@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vietnamese Dependency Parser - Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-tertiary: #1a1a24;
+            --accent-gold: #f59e0b;
+            --accent-emerald: #10b981;
+            --accent-violet: #8b5cf6;
+            --accent-rose: #f43f5e;
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --border-color: #27272a;
+        }
+        
+        * { font-family: 'Lexend', sans-serif; }
+        code, .mono { font-family: 'JetBrains Mono', monospace; }
+        
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        .bg-gradient-mesh {
+            background: 
+                radial-gradient(ellipse at 10% 20%, rgba(245, 158, 11, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 90% 80%, rgba(16, 185, 129, 0.08) 0%, transparent 50%),
+                var(--bg-primary);
+        }
+        
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-gold), #d97706);
+            color: white;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3);
+        }
+        
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+        }
+        .btn-secondary:hover {
+            border-color: var(--accent-gold);
+        }
+        
+        .select-custom, .input-custom {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .select-custom:focus, .input-custom:focus {
+            outline: none;
+            border-color: var(--accent-gold);
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
+        }
+        
+        .tree-container {
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            padding: 20px;
+            overflow-x: auto;
+            min-height: 200px;
+        }
+        
+        .tree-gold .arc-normal { stroke: var(--accent-gold); }
+        .tree-gold .arc-root { stroke: var(--accent-gold); stroke-width: 3; }
+        .tree-emerald .arc-normal { stroke: var(--accent-emerald); }
+        .tree-emerald .arc-root { stroke: var(--accent-emerald); stroke-width: 3; }
+        
+        .arc { fill: none; stroke-width: 2; }
+        .arc-label { font-size: 10px; font-family: 'JetBrains Mono', monospace; }
+        
+        .tree-gold .arc-label { fill: var(--accent-gold); }
+        .tree-emerald .arc-label { fill: var(--accent-emerald); }
+        
+        .comparison-row { display: flex; flex-direction: column; gap: 16px; }
+        
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+        }
+        .tag-gold { background: rgba(245, 158, 11, 0.2); color: var(--accent-gold); }
+        .tag-emerald { background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); }
+        .tag-correct { background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald); }
+        .tag-error { background: rgba(244, 63, 94, 0.2); color: var(--accent-rose); }
+        
+        .stat-card {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+        .stat-value { font-size: 28px; font-weight: 700; }
+        .stat-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; }
+        
+        .loading-spinner {
+            width: 32px; height: 32px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-gold);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-gradient-mesh">
+    <div class="min-h-screen p-6">
+        <!-- Header -->
+        <header class="max-w-7xl mx-auto mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold bg-gradient-to-r from-amber-400 to-emerald-400 bg-clip-text text-transparent">
+                        Dependency Parser Demo
+                    </h1>
+                    <p class="text-zinc-500 mt-1">Compare Ground Truth vs Model Predictions</p>
+                </div>
+                <div class="flex gap-4">
+                    <span class="flex items-center gap-2">
+                        <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+                        <span class="text-sm text-zinc-400">Ground Truth</span>
+                    </span>
+                    <span class="flex items-center gap-2">
+                        <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+                        <span class="text-sm text-zinc-400">Prediction (Correct)</span>
+                    </span>
+                    <span class="flex items-center gap-2">
+                        <span class="w-3 h-3 rounded-full bg-rose-500"></span>
+                        <span class="text-sm text-zinc-400">Prediction (Error)</span>
+                    </span>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Controls -->
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="card p-4">
+                <div class="flex flex-wrap items-center gap-4">
+                    <!-- Mode selector -->
+                    <div class="flex items-center gap-3">
+                        <label class="text-sm text-zinc-400">Mode:</label>
+                        <select id="mode-select" class="select-custom" onchange="switchMode()">
+                            <option value="dataset">From Dataset</option>
+                            <option value="custom">Custom Input</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Dataset controls -->
+                    <div id="dataset-controls" class="flex items-center gap-4">
+                        <div class="w-px h-8 bg-zinc-700"></div>
+                        <select id="dataset-select" class="select-custom" onchange="loadDataset()">
+                            <option value="train">Train</option>
+                            <option value="dev">Validation</option>
+                            <option value="test">Test</option>
+                        </select>
+                        
+                        <div class="flex items-center gap-2">
+                            <button class="btn-secondary px-3" onclick="goPrev()">←</button>
+                            <input type="number" id="sentence-input" class="input-custom w-20 text-center" 
+                                   min="1" value="1" onchange="goToSentence()">
+                            <span class="text-zinc-500">/</span>
+                            <span id="total-sentences" class="text-zinc-400 mono">0</span>
+                            <button class="btn-secondary px-3" onclick="goNext()">→</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Custom input controls (hidden by default) -->
+                    <div id="custom-controls" class="hidden flex-1 flex items-center gap-4">
+                        <div class="w-px h-8 bg-zinc-700"></div>
+                        <div class="flex-1 flex gap-2">
+                            <input type="text" id="words-input" class="input-custom flex-1" 
+                                   placeholder="Words (space-separated): Tôi yêu Việt Nam">
+                            <input type="text" id="pos-input" class="input-custom flex-1" 
+                                   placeholder="POS tags: PRON VERB PROPN PROPN">
+                            <button class="btn-primary" onclick="parseCustom()">Parse</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Accuracy Stats -->
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="grid grid-cols-4 gap-4">
+                <div class="stat-card">
+                    <div class="stat-value text-amber-400" id="stat-tokens">-</div>
+                    <div class="stat-label">Tokens</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value text-emerald-400" id="stat-uas">-</div>
+                    <div class="stat-label">UAS</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value text-violet-400" id="stat-las">-</div>
+                    <div class="stat-label">LAS</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value text-rose-400" id="stat-errors">-</div>
+                    <div class="stat-label">Errors</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sentence Display -->
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="card p-6">
+                <h2 class="text-lg font-semibold text-zinc-200 mb-3">Sentence</h2>
+                <p id="sentence-text" class="text-xl leading-relaxed text-zinc-100">Loading...</p>
+            </div>
+        </div>
+        
+        <!-- Tree Comparison -->
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="comparison-row">
+                <!-- Ground Truth -->
+                <div class="card p-6">
+                    <div class="flex items-center gap-2 mb-4">
+                        <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+                        <h2 class="text-lg font-semibold text-amber-400">Ground Truth</h2>
+                    </div>
+                    <div id="tree-gold" class="tree-container tree-gold">
+                        <div class="flex items-center justify-center py-8">
+                            <div class="loading-spinner"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Prediction -->
+                <div class="card p-6">
+                    <div class="flex items-center gap-2 mb-4">
+                        <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+                        <h2 class="text-lg font-semibold text-emerald-400">Prediction</h2>
+                    </div>
+                    <div id="tree-emerald" class="tree-container tree-emerald">
+                        <div class="flex items-center justify-center py-8">
+                            <div class="loading-spinner"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Comparison Table -->
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="card p-6">
+                <h2 class="text-lg font-semibold text-zinc-200 mb-4">Token-by-Token Comparison</h2>
+                <div class="overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="text-left text-xs text-zinc-500 uppercase">
+                                <th class="p-3">ID</th>
+                                <th class="p-3">Word</th>
+                                <th class="p-3">POS</th>
+                                <th class="p-3">Gold Head</th>
+                                <th class="p-3">Pred Head</th>
+                                <th class="p-3">Gold Rel</th>
+                                <th class="p-3">Pred Rel</th>
+                                <th class="p-3">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="comparison-table"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <footer class="max-w-7xl mx-auto py-6 border-t border-zinc-800">
+            <p class="text-center text-zinc-600 text-sm">
+                Vietnamese Dependency Parser • Demo Interface
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        let currentDataset = 'train';
+        let currentIndex = 0;
+        let totalSentences = 0;
+        let currentData = null;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDataset();
+        });
+        
+        function switchMode() {
+            const mode = document.getElementById('mode-select').value;
+            document.getElementById('dataset-controls').classList.toggle('hidden', mode === 'custom');
+            document.getElementById('custom-controls').classList.toggle('hidden', mode !== 'custom');
+            document.getElementById('custom-controls').classList.toggle('flex', mode === 'custom');
+        }
+        
+        async function loadDataset() {
+            currentDataset = document.getElementById('dataset-select').value;
+            const response = await fetch(`/api/dataset/${currentDataset}/info`);
+            const data = await response.json();
+            totalSentences = data.total;
+            document.getElementById('total-sentences').textContent = totalSentences;
+            currentIndex = 0;
+            loadSentence();
+        }
+        
+        async function loadSentence() {
+            const response = await fetch(`/api/compare/${currentDataset}/${currentIndex}`);
+            currentData = await response.json();
+            renderComparison();
+        }
+        
+        async function parseCustom() {
+            const words = document.getElementById('words-input').value.trim().split(/\s+/);
+            const pos = document.getElementById('pos-input').value.trim().split(/\s+/);
+            
+            if (words.length === 0 || words[0] === '') {
+                alert('Please enter words');
+                return;
+            }
+            
+            const response = await fetch('/api/parse', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ words, pos_tags: pos.length === words.length ? pos : words.map(() => 'X') })
+            });
+            currentData = await response.json();
+            currentData.hasGold = false;
+            renderComparison();
+        }
+        
+        function goPrev() {
+            if (currentIndex > 0) { currentIndex--; loadSentence(); }
+            document.getElementById('sentence-input').value = currentIndex + 1;
+        }
+        
+        function goNext() {
+            if (currentIndex < totalSentences - 1) { currentIndex++; loadSentence(); }
+            document.getElementById('sentence-input').value = currentIndex + 1;
+        }
+        
+        function goToSentence() {
+            const val = parseInt(document.getElementById('sentence-input').value) - 1;
+            if (val >= 0 && val < totalSentences) { currentIndex = val; loadSentence(); }
+        }
+        
+        function renderComparison() {
+            if (!currentData) return;
+            
+            const { tokens, pred_heads, pred_rels, hasGold } = currentData;
+            
+            // Sentence text
+            document.getElementById('sentence-text').textContent = tokens.map(t => t.form).join(' ');
+            
+            // Calculate stats
+            let correctArcs = 0, correctLabels = 0;
+            tokens.forEach((t, i) => {
+                if (hasGold) {
+                    if (t.head === pred_heads[i]) correctArcs++;
+                    if (t.head === pred_heads[i] && t.deprel === pred_rels[i]) correctLabels++;
+                }
+            });
+            
+            const n = tokens.length;
+            document.getElementById('stat-tokens').textContent = n;
+            document.getElementById('stat-uas').textContent = hasGold ? (correctArcs / n * 100).toFixed(1) + '%' : 'N/A';
+            document.getElementById('stat-las').textContent = hasGold ? (correctLabels / n * 100).toFixed(1) + '%' : 'N/A';
+            document.getElementById('stat-errors').textContent = hasGold ? (n - correctArcs) : 'N/A';
+            
+            // Build error map for prediction tree
+            const errors = tokens.map((t, i) => hasGold && (t.head !== pred_heads[i] || t.deprel !== pred_rels[i]));
+            
+            // Render trees
+            renderTree('tree-gold', tokens, tokens.map(t => t.head), tokens.map(t => t.deprel), 'gold', null);
+            renderTree('tree-emerald', tokens, pred_heads, pred_rels, 'emerald', errors);
+            
+            // Render table
+            renderTable(tokens, pred_heads, pred_rels, hasGold);
+            
+            document.getElementById('sentence-input').value = currentIndex + 1;
+        }
+        
+        function renderTree(containerId, tokens, heads, rels, colorClass, errors) {
+            const container = document.getElementById(containerId);
+            const nodeWidth = 80;
+            const nodeSpacing = 15;
+            const totalWidth = tokens.length * (nodeWidth + nodeSpacing);
+            const svgHeight = 180;
+            const nodeY = svgHeight - 50;
+            
+            const colorNormal = colorClass === 'gold' ? '#f59e0b' : '#10b981';
+            const colorError = '#f43f5e';
+            
+            let html = `<svg width="${Math.max(totalWidth, 600)}" height="${svgHeight}">
+                <defs>
+                    <marker id="arrow-${colorClass}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                        <polygon points="0 0, 8 3, 0 6" fill="${colorNormal}"/>
+                    </marker>
+                    <marker id="arrow-error" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                        <polygon points="0 0, 8 3, 0 6" fill="${colorError}"/>
+                    </marker>
+                </defs>`;
+            
+            // Draw arcs
+            tokens.forEach((token, i) => {
+                const headIdx = heads[i] - 1;
+                const tokenX = (i + 0.5) * (nodeWidth + nodeSpacing);
+                const isError = errors && errors[i];
+                const arcColor = isError ? colorError : colorNormal;
+                const arrowId = isError ? 'arrow-error' : `arrow-${colorClass}`;
+                const strokeWidth = isError ? 3 : 2;
+                
+                if (heads[i] === 0) {
+                    html += `<path d="M ${tokenX} 15 L ${tokenX} ${nodeY - 20}" 
+                             stroke="${arcColor}" stroke-width="${strokeWidth}" fill="none" marker-end="url(#${arrowId})"/>
+                             <text x="${tokenX}" y="12" class="arc-label" text-anchor="middle" fill="${arcColor}" font-weight="${isError ? '700' : '400'}">root</text>`;
+                } else if (headIdx >= 0 && headIdx < tokens.length) {
+                    const headX = (headIdx + 0.5) * (nodeWidth + nodeSpacing);
+                    const arcH = Math.min(25 + Math.abs(i - headIdx) * 12, 80);
+                    const midX = (tokenX + headX) / 2;
+                    html += `<path d="M ${headX} ${nodeY - 15} Q ${midX} ${nodeY - 15 - arcH} ${tokenX} ${nodeY - 15}" 
+                             stroke="${arcColor}" stroke-width="${strokeWidth}" fill="none" marker-end="url(#${arrowId})"/>
+                             <text x="${midX}" y="${nodeY - 20 - arcH}" class="arc-label" text-anchor="middle" fill="${arcColor}" font-weight="${isError ? '700' : '400'}">${rels[i]}</text>`;
+                }
+            });
+            
+            // Draw nodes
+            tokens.forEach((token, i) => {
+                const x = i * (nodeWidth + nodeSpacing) + nodeSpacing/2;
+                const isError = errors && errors[i];
+                const nodeBorder = isError ? '#f43f5e' : '#27272a';
+                const nodeBorderWidth = isError ? 2 : 1;
+                
+                html += `<g transform="translate(${x}, ${nodeY})">
+                    <rect x="0" y="0" width="${nodeWidth}" height="36" rx="6" 
+                          fill="#1a1a24" stroke="${nodeBorder}" stroke-width="${nodeBorderWidth}"/>
+                    <text x="${nodeWidth/2}" y="16" text-anchor="middle" fill="${isError ? '#f43f5e' : '#f4f4f5'}" font-size="12" font-weight="600">${token.form}</text>
+                    <text x="${nodeWidth/2}" y="30" text-anchor="middle" fill="#71717a" font-size="9">${token.upos}</text>
+                </g>`;
+            });
+            
+            html += '</svg>';
+            container.innerHTML = html;
+        }
+        
+        function renderTable(tokens, predHeads, predRels, hasGold) {
+            const tbody = document.getElementById('comparison-table');
+            tbody.innerHTML = tokens.map((t, i) => {
+                const arcMatch = !hasGold || t.head === predHeads[i];
+                const relMatch = !hasGold || t.deprel === predRels[i];
+                const fullMatch = arcMatch && relMatch;
+                
+                return `<tr class="border-b border-zinc-800">
+                    <td class="p-3 mono text-zinc-500">${t.id}</td>
+                    <td class="p-3 font-medium">${t.form}</td>
+                    <td class="p-3"><span class="tag tag-gold">${t.upos}</span></td>
+                    <td class="p-3 mono ${!arcMatch ? 'text-amber-400' : ''}">${t.head === 0 ? 'ROOT' : t.head}</td>
+                    <td class="p-3 mono ${!arcMatch ? 'text-emerald-400' : ''}">${predHeads[i] === 0 ? 'ROOT' : predHeads[i]}</td>
+                    <td class="p-3"><span class="tag ${!relMatch && hasGold ? 'tag-gold' : 'tag-gold'}">${t.deprel}</span></td>
+                    <td class="p-3"><span class="tag ${!relMatch && hasGold ? 'tag-emerald' : 'tag-emerald'}">${predRels[i]}</span></td>
+                    <td class="p-3">${hasGold ? (fullMatch ? '<span class="tag tag-correct">✓</span>' : '<span class="tag tag-error">✗</span>') : '-'}</td>
+                </tr>`;
+            }).join('');
+        }
+    </script>
+</body>
+</html>
+

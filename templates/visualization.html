@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vietnamese Dependency Parser - Visualization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Lexend:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0f0f14;
+            --bg-secondary: #16161d;
+            --bg-tertiary: #1e1e28;
+            --accent-primary: #7c3aed;
+            --accent-secondary: #a78bfa;
+            --accent-glow: rgba(124, 58, 237, 0.3);
+            --text-primary: #f4f4f5;
+            --text-secondary: #a1a1aa;
+            --text-muted: #71717a;
+            --border-color: #27272a;
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --error: #ef4444;
+        }
+        
+        * { font-family: 'Lexend', sans-serif; }
+        code, .mono { font-family: 'JetBrains Mono', monospace; }
+        
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        .bg-gradient-mesh {
+            background: 
+                radial-gradient(ellipse at 20% 0%, rgba(124, 58, 237, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 100%, rgba(167, 139, 250, 0.1) 0%, transparent 50%),
+                var(--bg-primary);
+        }
+        
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+        }
+        
+        .card-hover:hover {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-primary), #9333ea);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+        }
+        .btn-secondary:hover { border-color: var(--accent-secondary); background: var(--bg-secondary); }
+        .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .select-custom {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .select-custom:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-glow); }
+        
+        .input-custom {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .input-custom:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-glow); }
+        
+        .tree-container {
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            padding: 24px;
+            overflow-x: auto;
+        }
+        
+        .arc { fill: none; stroke-width: 2; transition: all 0.2s; }
+        .arc-normal { stroke: var(--accent-secondary); }
+        .arc-root { stroke: var(--success); stroke-width: 3; }
+        .arc-label { font-size: 11px; font-family: 'JetBrains Mono', monospace; fill: var(--text-secondary); }
+        
+        .data-table { width: 100%; border-collapse: collapse; }
+        .data-table th {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .data-table td { padding: 12px 16px; border-bottom: 1px solid var(--border-color); font-size: 14px; }
+        .data-table tr:hover td { background: var(--bg-tertiary); }
+        
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+        }
+        .tag-pos { background: rgba(124, 58, 237, 0.2); color: var(--accent-secondary); }
+        .tag-rel { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+        .tag-head { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        
+        .loading-spinner {
+            width: 40px; height: 40px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .stat-badge {
+            background: linear-gradient(135deg, var(--accent-primary), #9333ea);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .kbd {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body class="bg-gradient-mesh">
+    <div class="min-h-screen p-6">
+        <!-- Header -->
+        <header class="max-w-7xl mx-auto mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold bg-gradient-to-r from-violet-400 to-purple-400 bg-clip-text text-transparent">
+                        Dependency Tree Visualizer
+                    </h1>
+                    <p class="text-zinc-500 mt-1">Vietnamese Dependency Parsing - Interactive Explorer</p>
+                </div>
+                <div class="flex items-center gap-4 text-sm text-zinc-500">
+                    <span class="flex items-center gap-2">
+                        <span class="kbd">←</span>
+                        <span class="kbd">→</span>
+                        Navigate
+                    </span>
+                    <span class="flex items-center gap-2">
+                        <span class="kbd">G</span>
+                        Go to
+                    </span>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Controls -->
+        <div class="max-w-7xl mx-auto mb-6">
+            <div class="card p-4">
+                <div class="flex flex-wrap items-center gap-4">
+                    <!-- Dataset selector -->
+                    <div class="flex items-center gap-3">
+                        <label class="text-sm text-zinc-400">Dataset:</label>
+                        <select id="dataset-select" class="select-custom" onchange="loadDataset()">
+                            <option value="train">Train</option>
+                            <option value="dev">Validation (Dev)</option>
+                            <option value="test">Test</option>
+                        </select>
+                    </div>
+                    
+                    <div class="w-px h-8 bg-zinc-700"></div>
+                    
+                    <!-- Navigation -->
+                    <div class="flex items-center gap-2">
+                        <button id="btn-first" class="btn-secondary px-3" onclick="goFirst()" title="First">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"></path>
+                            </svg>
+                        </button>
+                        <button id="btn-prev" class="btn-secondary px-3" onclick="goPrev()" title="Previous (←)">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                            </svg>
+                        </button>
+                        
+                        <div class="flex items-center gap-2 px-2">
+                            <input type="number" id="sentence-input" class="input-custom w-20 text-center" 
+                                   min="1" value="1" onchange="goToSentence()">
+                            <span class="text-zinc-500">/</span>
+                            <span id="total-sentences" class="text-zinc-400 mono">0</span>
+                        </div>
+                        
+                        <button id="btn-next" class="btn-secondary px-3" onclick="goNext()" title="Next (→)">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                            </svg>
+                        </button>
+                        <button id="btn-last" class="btn-secondary px-3" onclick="goLast()" title="Last">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    
+                    <div class="w-px h-8 bg-zinc-700"></div>
+                    
+                    <!-- Quick jump -->
+                    <button class="btn-primary" onclick="showJumpDialog()">Go to Sentence</button>
+                    
+                    <!-- Stats -->
+                    <div class="ml-auto flex items-center gap-3">
+                        <span id="sentence-length" class="stat-badge">0 tokens</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Main content -->
+        <div class="max-w-7xl mx-auto space-y-6">
+            <!-- Sentence display -->
+            <div class="card p-6">
+                <div class="flex items-center gap-3 mb-4">
+                    <h2 class="text-lg font-semibold text-zinc-200">Sentence</h2>
+                    <span id="current-index" class="text-sm text-zinc-500 mono">#1</span>
+                </div>
+                <p id="sentence-text" class="text-xl leading-relaxed text-zinc-100">Loading...</p>
+            </div>
+            
+            <!-- Dependency Tree Visualization -->
+            <div class="card p-6">
+                <h2 class="text-lg font-semibold text-zinc-200 mb-4">Dependency Tree</h2>
+                <div id="tree-container" class="tree-container">
+                    <div class="flex items-center justify-center py-12">
+                        <div class="loading-spinner"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Token Details Table -->
+            <div class="card p-6">
+                <h2 class="text-lg font-semibold text-zinc-200 mb-4">Token Details</h2>
+                <div class="overflow-x-auto">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Form</th>
+                                <th>Lemma</th>
+                                <th>UPOS</th>
+                                <th>Head</th>
+                                <th>Relation</th>
+                            </tr>
+                        </thead>
+                        <tbody id="token-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <footer class="max-w-7xl mx-auto mt-12 py-6 border-t border-zinc-800">
+            <p class="text-center text-zinc-600 text-sm">
+                Vietnamese Dependency Parsing Project • Built with Flask & Modern Web Technologies
+            </p>
+        </footer>
+    </div>
+    
+    <!-- Jump Dialog (Modal) -->
+    <div id="jump-dialog" class="fixed inset-0 bg-black/50 backdrop-blur-sm hidden items-center justify-center z-50" onclick="hideJumpDialog()">
+        <div class="card p-6 w-96" onclick="event.stopPropagation()">
+            <h3 class="text-lg font-semibold mb-4">Go to Sentence</h3>
+            <input type="number" id="jump-input" class="input-custom w-full mb-4" 
+                   placeholder="Enter sentence number..." min="1" autofocus>
+            <div class="flex gap-3">
+                <button class="btn-secondary flex-1" onclick="hideJumpDialog()">Cancel</button>
+                <button class="btn-primary flex-1" onclick="jumpToSentence()">Go</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentDataset = 'train';
+        let currentIndex = 0;
+        let totalSentences = 0;
+        let currentSentence = null;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            loadDataset();
+            setupKeyboardShortcuts();
+        });
+        
+        function setupKeyboardShortcuts() {
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT') return;
+                switch(e.key) {
+                    case 'ArrowLeft': goPrev(); break;
+                    case 'ArrowRight': goNext(); break;
+                    case 'g': case 'G': showJumpDialog(); break;
+                    case 'Escape': hideJumpDialog(); break;
+                }
+            });
+        }
+        
+        async function loadDataset() {
+            currentDataset = document.getElementById('dataset-select').value;
+            try {
+                const response = await fetch(`/api/dataset/${currentDataset}/info`);
+                const data = await response.json();
+                totalSentences = data.total;
+                document.getElementById('total-sentences').textContent = totalSentences;
+                currentIndex = 0;
+                await loadSentence();
+            } catch (error) {
+                console.error('Error loading dataset:', error);
+            }
+        }
+        
+        async function loadSentence() {
+            try {
+                const response = await fetch(`/api/dataset/${currentDataset}/sentence/${currentIndex}`);
+                currentSentence = await response.json();
+                renderSentence();
+                updateNavigation();
+            } catch (error) {
+                console.error('Error loading sentence:', error);
+            }
+        }
+        
+        function goFirst() { currentIndex = 0; loadSentence(); }
+        function goLast() { currentIndex = totalSentences - 1; loadSentence(); }
+        function goPrev() { if (currentIndex > 0) { currentIndex--; loadSentence(); } }
+        function goNext() { if (currentIndex < totalSentences - 1) { currentIndex++; loadSentence(); } }
+        
+        function goToSentence() {
+            const input = document.getElementById('sentence-input');
+            const value = parseInt(input.value) - 1;
+            if (value >= 0 && value < totalSentences) { currentIndex = value; loadSentence(); }
+            else { input.value = currentIndex + 1; }
+        }
+        
+        function updateNavigation() {
+            document.getElementById('sentence-input').value = currentIndex + 1;
+            document.getElementById('current-index').textContent = `#${currentIndex + 1}`;
+            document.getElementById('btn-first').disabled = currentIndex === 0;
+            document.getElementById('btn-prev').disabled = currentIndex === 0;
+            document.getElementById('btn-next').disabled = currentIndex === totalSentences - 1;
+            document.getElementById('btn-last').disabled = currentIndex === totalSentences - 1;
+        }
+        
+        function showJumpDialog() {
+            const dialog = document.getElementById('jump-dialog');
+            dialog.classList.remove('hidden');
+            dialog.classList.add('flex');
+            document.getElementById('jump-input').value = '';
+            document.getElementById('jump-input').focus();
+        }
+        
+        function hideJumpDialog() {
+            const dialog = document.getElementById('jump-dialog');
+            dialog.classList.add('hidden');
+            dialog.classList.remove('flex');
+        }
+        
+        function jumpToSentence() {
+            const input = document.getElementById('jump-input');
+            const value = parseInt(input.value) - 1;
+            if (value >= 0 && value < totalSentences) { currentIndex = value; loadSentence(); }
+            hideJumpDialog();
+        }
+        
+        function renderSentence() {
+            if (!currentSentence) return;
+            const tokens = currentSentence.tokens;
+            document.getElementById('sentence-text').textContent = tokens.map(t => t.form).join(' ');
+            document.getElementById('sentence-length').textContent = `${tokens.length} tokens`;
+            renderTree(tokens);
+            renderTable(tokens);
+        }
+        
+        function renderTree(tokens) {
+            const container = document.getElementById('tree-container');
+            const nodeWidth = 100, nodeSpacing = 20;
+            const totalWidth = tokens.length * (nodeWidth + nodeSpacing);
+            const svgHeight = 200, nodeY = svgHeight - 60;
+            
+            let html = `<svg width="${Math.max(totalWidth, 800)}" height="${svgHeight}" class="mx-auto">
+                <defs>
+                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="var(--accent-secondary)"/>
+                    </marker>
+                    <marker id="arrowhead-root" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                        <polygon points="0 0, 10 3.5, 0 7" fill="var(--success)"/>
+                    </marker>
+                </defs>`;
+            
+            tokens.forEach((token, i) => {
+                const headIdx = token.head - 1;
+                const tokenX = (i + 0.5) * (nodeWidth + nodeSpacing);
+                
+                if (token.head === 0) {
+                    const rootY = 20;
+                    html += `<path d="M ${tokenX} ${rootY} L ${tokenX} ${nodeY - 30}" class="arc arc-root" marker-end="url(#arrowhead-root)"/>
+                             <text x="${tokenX}" y="${rootY - 5}" class="arc-label" text-anchor="middle">ROOT</text>`;
+                } else if (headIdx >= 0 && headIdx < tokens.length) {
+                    const headX = (headIdx + 0.5) * (nodeWidth + nodeSpacing);
+                    const arcHeight = Math.min(30 + Math.abs(i - headIdx) * 15, 100);
+                    const midX = (tokenX + headX) / 2;
+                    html += `<path d="M ${headX} ${nodeY - 25} Q ${midX} ${nodeY - 25 - arcHeight} ${tokenX} ${nodeY - 25}" class="arc arc-normal" marker-end="url(#arrowhead)"/>
+                             <text x="${midX}" y="${nodeY - 30 - arcHeight + 10}" class="arc-label" text-anchor="middle">${token.deprel}</text>`;
+                }
+            });
+            
+            tokens.forEach((token, i) => {
+                const x = i * (nodeWidth + nodeSpacing) + nodeSpacing/2;
+                html += `<g transform="translate(${x}, ${nodeY})">
+                    <rect x="0" y="0" width="${nodeWidth}" height="45" rx="6" fill="var(--bg-secondary)" stroke="var(--border-color)" stroke-width="2"/>
+                    <text x="${nodeWidth/2}" y="18" text-anchor="middle" fill="var(--text-primary)" font-weight="600" font-size="13">${token.form}</text>
+                    <text x="${nodeWidth/2}" y="35" text-anchor="middle" fill="var(--accent-secondary)" font-size="10" font-family="'JetBrains Mono', monospace">${token.upos}</text>
+                </g>`;
+            });
+            
+            html += '</svg>';
+            container.innerHTML = html;
+        }
+        
+        function renderTable(tokens) {
+            const tbody = document.getElementById('token-table-body');
+            tbody.innerHTML = tokens.map(token => `
+                <tr>
+                    <td class="mono text-zinc-400">${token.id}</td>
+                    <td class="font-medium">${token.form}</td>
+                    <td class="text-zinc-400">${token.lemma}</td>
+                    <td><span class="tag tag-pos">${token.upos}</span></td>
+                    <td><span class="tag tag-head">${token.head === 0 ? 'ROOT' : token.head}</span></td>
+                    <td><span class="tag tag-rel">${token.deprel}</span></td>
+                </tr>
+            `).join('');
+        }
+        
+        document.getElementById('jump-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') jumpToSentence();
+        });
+    </script>
+</body>
+</html>
+

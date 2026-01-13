@@ -1,0 +1,30 @@
+[project]
+name = "parsing"
+version = "0.1.0"
+dependencies = [
+    "torch>=1.8.0",
+    "numpy>=1.19.0",
+    "tqdm>=4.50.0",
+    "conllu==6.0.0",
+    "loguru==0.7.3",
+    "PyYAML==6.0.3",
+    "flask>=3.0.0"
+]
+
+[project.optional-dependencies]
+bert = [
+    "transformers>=4.30.0",
+]
+all = [
+    "transformers>=4.30.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["checkpoints*", "venv*", "data", "logs", "results", "configs"]
+
+[project.scripts]
+train = "scripts.cli:train"
+visualize = "scripts.cli:visualize"
+demo = "scripts.cli:demo"
+analyze = "scripts.cli:analyze"

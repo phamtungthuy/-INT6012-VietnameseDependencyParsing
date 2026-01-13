@@ -1,0 +1,30 @@
+# Vietnamese Dependency Parser Configuration
+
+# Model hyperparameters
+model:
+  embedding_dim: 100
+  pos_dim: 50
+  hidden_dim: 400
+  num_layers: 3
+  arc_dim: 500
+  label_dim: 100
+  dropout: 0.33
+
+# Training hyperparameters
+training:
+  batch_size: 32
+  num_epochs: 30
+  lr: 0.002
+  weight_decay: 0.0001
+  min_freq: 2
+  seed: 42
+  save_every: 5
+
+# Paths
+paths:
+  save_dir: checkpoints
+  results_dir: results
+
+# Device (null = auto-detect)
+device: null
+

@@ -9,8 +9,8 @@ import numpy as np
 import torch
 
 from data_processing.loader import get_data_loaders
-from models import BiLSTMParser
-from training import Trainer, TrainConfig
+from models.parser_factory import ParserFactory, ParserType
+from training import TrainConfig, TrainerFactory
 from utils.constants import (
     ROOT_PATH,
     TRAIN_FILE_PATH,
@@ -21,9 +21,7 @@ from utils.constants import (
 from utils.logs import train_logger
 
 
-
 def set_seed(seed: int = 42):
-    """Set random seed cho reproducibility"""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -31,13 +29,22 @@ def set_seed(seed: int = 42):
         torch.cuda.manual_seed_all(seed)
 
 
-def print_banner():
-    """Print training banner"""
-    print("""
+PARSER_DESCRIPTIONS = {
+    'biaffine': 'BiLSTM + Biaffine Attention (Dozat & Manning 2017)',
+    'chen_manning_2014': 'Transition-based Greedy (Chen & Manning 2014)',
+    'weiss_2015': 'Transition-based Structured (Weiss et al. 2015)',
+    'andor_2016': 'Transition-based Global (Andor et al. 2016)',
+}
+
+
+def print_banner(parser_type: str):
+    parser_name = PARSER_DESCRIPTIONS.get(parser_type, parser_type)
+    
+    print(f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                              ║
 ║   🌳 Vietnamese Dependency Parser                                            ║
-║   BiLSTM + Biaffine Attention                                                ║
+║   {parser_name:<68} ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
     """)
@@ -50,25 +57,12 @@ def save_results(
     vocab_data: dict,
     results_dir: Path
 ):
-    """
-    Save all training artifacts to results directory.
-    
-    Creates a timestamped folder with:
-    - config.yaml (copy of original config)
-    - config.json (full config including vocab sizes)
-    - results.json (final test results)
-    - history.json (training history)
-    - vocab.pt (vocabulary)
-    """
-    # Create timestamped results folder
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = results_dir / f"run_{timestamp}"
+    run_dir = results_dir / f"run_{config.parser_type}_{timestamp}"
     run_dir.mkdir(parents=True, exist_ok=True)
     
-    # Copy original config.yaml
     shutil.copy(CONFIG_FILE, run_dir / "config.yaml")
     
-    # Save full config as JSON (includes runtime info)
     config_dict = asdict(config)
     config_dict['vocab_size'] = vocab_data['vocab_size']
     config_dict['pos_size'] = vocab_data['pos_size']
@@ -78,15 +72,12 @@ def save_results(
     with open(run_dir / "config.json", 'w') as f:
         json.dump(config_dict, f, indent=2)
     
-    # Save results
     with open(run_dir / "results.json", 'w') as f:
         json.dump(results, f, indent=2)
     
-    # Save training history
     with open(run_dir / "history.json", 'w') as f:
         json.dump(history, f, indent=2)
     
-    # Save vocabulary
     torch.save(vocab_data['vocab'], run_dir / "vocab.pt")
     
     train_logger.info(f"Saved all results to {run_dir}")
@@ -95,15 +86,15 @@ def save_results(
 
 
 def run_training(config: TrainConfig):
-    print_banner()
+    print_banner(config.parser_type)
     
     # Device setup
     device = config.device
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
-    # Set seed
     set_seed(config.seed)
+    train_logger.info(f"Parser type: {config.parser_type}")
     train_logger.info(f"Random seed: {config.seed}")
     train_logger.info(f"Device: {device}")
     
@@ -129,22 +120,59 @@ def run_training(config: TrainConfig):
     train_logger.info(f"  Relations: {len(vocab.rel2idx)}")
     
     # =========================================================================
-    # Create Model
+    # Create Model using Factory
     # =========================================================================
     train_logger.info("Creating model...")
     
-    model = BiLSTMParser(
-        vocab_size=len(vocab.word2idx),
-        pos_size=len(vocab.pos2idx),
-        embedding_dim=config.embedding_dim,
-        pos_dim=config.pos_dim,
-        hidden_dim=config.hidden_dim,
-        num_layers=config.num_layers,
-        arc_dim=config.arc_dim,
-        label_dim=config.label_dim,
-        num_labels=len(vocab.rel2idx),
-        dropout=config.dropout
-    )
+    parser_type = ParserFactory.from_string(config.parser_type)
+    
+    # Common kwargs for all parsers
+    model_kwargs = {
+        'vocab_size': len(vocab.word2idx),
+        'pos_size': len(vocab.pos2idx),
+        'num_labels': len(vocab.rel2idx),
+        'embedding_dim': config.embedding_dim,
+        'dropout': config.dropout,
+    }
+    
+    # Parser-specific kwargs
+    if parser_type == ParserType.BIAFFINE:
+        # Biaffine attention parser (Dozat & Manning 2017)
+        model_kwargs.update({
+            'pos_dim': config.pos_dim,
+            'hidden_dim': config.hidden_dim,
+            'num_layers': config.num_layers,
+            'arc_dim': config.arc_dim,
+            'label_dim': config.label_dim,
+        })
+    elif parser_type == ParserType.CHEN_MANNING_2014:
+        # Chen & Manning 2014 - Greedy transition parser
+        model_kwargs.update({
+            'pos_dim': config.pos_dim,
+            'hidden_dim': config.hidden_dim,
+            'num_stack': 3,
+            'num_buffer': 3,
+        })
+    elif parser_type == ParserType.WEISS_2015:
+        # Weiss et al. 2015 - Structured training with beam
+        model_kwargs.update({
+            'pos_dim': config.pos_dim,
+            'hidden_dim': 1024,  # Larger network
+            'num_stack': 3,
+            'num_buffer': 3,
+            'beam_size': 8,
+        })
+    elif parser_type == ParserType.ANDOR_2016:
+        # Andor et al. 2016 - Globally normalized
+        model_kwargs.update({
+            'pos_dim': config.pos_dim,
+            'hidden_dim': 1024,  # Larger network
+            'num_stack': 3,
+            'num_buffer': 3,
+            'beam_size': 32,
+        })
+    
+    model = ParserFactory.create_parser(parser_type, **model_kwargs)
     
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -152,9 +180,11 @@ def run_training(config: TrainConfig):
     train_logger.info(f"Trainable parameters: {trainable_params:,}")
     
     # =========================================================================
-    # Create Trainer
+    # Create Trainer using Factory
     # =========================================================================
-    trainer = Trainer(
+    trainer_type = TrainerFactory.from_parser_type(config.parser_type)
+    trainer = TrainerFactory.create_trainer(
+        trainer_type=trainer_type,
         model=model,
         train_loader=train_loader,
         validation_loader=dev_loader,
@@ -194,16 +224,17 @@ def run_training(config: TrainConfig):
         train_logger.info(f"Loaded best model from {best_model_path}")
     
     # Evaluate on test set
-    test_results = trainer.evaluator.evaluate_model(model, test_loader, device=device)
+    test_results = trainer.evaluate(test_loader)
     
     train_logger.info(f"Test Results:")
     train_logger.info(f"  UAS (Unlabeled Attachment Score): {test_results['uas']:.2f}%")
     train_logger.info(f"  LAS (Labeled Attachment Score): {test_results['las']:.2f}%")
     
     # =========================================================================
-    # Save Results to results/ folder
+    # Save Results
     # =========================================================================
     results = {
+        'parser_type': config.parser_type,
         'test_uas': test_results['uas'],
         'test_las': test_results['las'],
         'best_dev_uas': trainer.best_uas,
@@ -239,6 +270,7 @@ def run_training(config: TrainConfig):
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                      TRAINING AND EVALUATION COMPLETED!                      ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
+║  Parser: {config.parser_type:<67} ║
 ║  Results saved to: {str(run_dir):<56} ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
     """)

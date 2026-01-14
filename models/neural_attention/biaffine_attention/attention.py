@@ -1,9 +1,9 @@
 import math
+
 import torch
-from models.attention.base_attention import BaseAttention
+import torch.nn as nn
 
-
-class BiaffineAttention(BaseAttention):
+class BiaffineAttention(nn.Module):
     """
     Biaffine Attention: score = (x^T W y + bias_x^T x + bias_y^T y) * scale
     
@@ -19,9 +19,26 @@ class BiaffineAttention(BaseAttention):
             bias: Tuple (bias_x, bias_y) whether to use bias terms
             scale: Whether to apply score normalization (1/√d)
         """
-        super().__init__(in_features, out_features, bias)
         self.scale = scale
         self.scale_factor = 1.0 / math.sqrt(in_features) if scale else 1.0
+        
+        self.in_features = in_features
+        self.out_features = out_features
+        self.bias = bias
+        
+        # Weight matrix: [out_features, in_features, in_features]
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features, in_features))
+        
+        # Bias terms
+        if bias[0]:
+            self.bias_x = nn.Parameter(torch.Tensor(out_features, in_features))
+        else:
+            self.register_parameter('bias_x', None)
+            
+        if bias[1]:
+            self.bias_y = nn.Parameter(torch.Tensor(out_features, in_features))
+        else:
+            self.register_parameter('bias_y', None)
     
     def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """

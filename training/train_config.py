@@ -4,7 +4,9 @@ from dataclasses import dataclass
 
 @dataclass
 class TrainConfig:
-    """Training configuration"""
+    # Parser type: bilstm, transition
+    parser_type: str = 'bilstm'
+    
     # Model hyperparameters
     embedding_dim: int = 100
     pos_dim: int = 50

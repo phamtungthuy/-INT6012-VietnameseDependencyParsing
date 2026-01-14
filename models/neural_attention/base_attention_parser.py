@@ -2,15 +2,15 @@ from abc import abstractmethod
 
 import torch.nn as nn
 
-class BaseParser(nn.Module):
+class BaseAttentionParser(nn.Module):
     @abstractmethod
-    def forward(self, words, pos_tags, lengths):
+    def forward(self, *args, **kwargs):
         raise NotImplementedError("Subclasses must implement forward method")
     
     @abstractmethod
-    def loss(self, arc_scores, label_scores, heads, rels, lengths):
+    def loss(self, *args, **kwargs):
         raise NotImplementedError("Subclasses must implement loss method")
     
     @abstractmethod
-    def decode(self, arc_scores, label_scores, lengths):
+    def decode(self, *args, **kwargs):
         raise NotImplementedError("Subclasses must implement decode method")

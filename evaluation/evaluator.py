@@ -15,6 +15,7 @@ from evaluation.metrics import (
 )
 
 
+
 class Evaluator:
     """
     Evaluator class để đánh giá dependency parsing models
@@ -45,7 +46,7 @@ class Evaluator:
         self.all_gold_heads = []
         self.all_gold_rels = []
     
-    def evaluate_model(self, model: torch.nn.Module, data_loader: torch.utils.data.DataLoader,
+    def evaluate_model(self, model: any, data_loader: torch.utils.data.DataLoader,
                        device: str = 'cpu', return_predictions: bool = False) -> Dict:
         """
         Đánh giá neural model trên data loader
@@ -115,50 +116,62 @@ class Evaluator:
         
         return results
     
-    def evaluate_baseline(self, baseline, sentences: List[List[Dict]], 
-                          pos_aware: bool = False) -> Dict:
-        """
-        Đánh giá baseline model
-        
-        Args:
-            baseline: Baseline model object
-            sentences: List các sentences (mỗi sentence là list các word_info dicts)
-            pos_aware: Baseline có cần POS tags không
-        
-        Returns:
-            Dict chứa UAS (baselines thường không có LAS)
-        """
+    def evaluate_transition_model(self, model: any, data_loader: torch.utils.data.DataLoader,
+                                   device: str = 'cpu', return_predictions: bool = False) -> Dict:
         self.reset()
+        model.eval()
         
-        for sent in sentences:
-            length = len(sent)
-            
-            # Predict
-            if pos_aware and hasattr(baseline, 'predict'):
-                pos_tags = [token['upos'] for token in sent]
-                result = baseline.predict(pos_tags)
+        with torch.no_grad():
+            for batch in tqdm(data_loader, desc='Evaluating'):
+                words = batch['words'].to(device)
+                pos_tags = batch['pos_tags'].to(device)
+                heads = batch['heads'].to(device)
+                rels = batch['rels'].to(device)
+                lengths = batch['lengths'].to(device)
                 
-                if isinstance(result, tuple):
-                    pred_heads, pred_rels = result
-                else:
-                    pred_heads = result
-                    pred_rels = None
-            else:
-                pred_heads = baseline.predict(length)
-                pred_rels = None
-            
-            # Gold labels
-            gold_heads = [token['head'] for token in sent]
-            gold_rels = [token.get('deprel', None) for token in sent]
-            
-            # Tính UAS
-            # Baseline predict từ index 0, gold heads từ index 0
-            for pred, gold in zip(pred_heads, gold_heads):
-                if pred == gold:
-                    self.total_uas_correct += 1
-                self.total_tokens += 1
+                # Forward pass (returns dummy scores for transition parser)
+                arc_scores, label_scores = model(words, pos_tags, lengths)
+                
+                # Decode - transition parser needs words and pos_tags
+                pred_heads, pred_rels = model.decode(
+                    arc_scores, label_scores, lengths,
+                    words=words, pos_tags=pos_tags
+                )
+                
+                # Tính metrics cho từng sentence trong batch
+                for i in range(len(lengths)):
+                    length = int(lengths[i].item())
+                    
+                    pred_h = pred_heads[i, :length].cpu().tolist()
+                    pred_r = pred_rels[i, :length].cpu().tolist()
+                    gold_h = heads[i, :length].cpu().tolist()
+                    gold_r = rels[i, :length].cpu().tolist()
+                    
+                    uas_correct, uas_total = compute_uas(pred_h, gold_h)
+                    self.total_uas_correct += uas_correct
+                    
+                    las_correct, las_total = compute_las(pred_h, pred_r, gold_h, gold_r)
+                    self.total_las_correct += las_correct
+                    
+                    self.total_tokens += uas_total
+                    
+                    if return_predictions:
+                        self.all_pred_heads.append(pred_h)
+                        self.all_pred_rels.append(pred_r)
+                        self.all_gold_heads.append(gold_h)
+                        self.all_gold_rels.append(gold_r)
         
-        return self._compute_results()
+        results = self._compute_results()
+        
+        if return_predictions:
+            results['predictions'] = {
+                'pred_heads': self.all_pred_heads,
+                'pred_rels': self.all_pred_rels,
+                'gold_heads': self.all_gold_heads,
+                'gold_rels': self.all_gold_rels
+            }
+        
+        return results
     
     def evaluate_predictions(self, pred_heads: List[List[int]], gold_heads: List[List[int]],
                              pred_rels: Optional[List[List[int]]] = None,

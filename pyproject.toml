@@ -25,6 +25,8 @@ exclude = ["checkpoints*", "venv*", "data", "logs", "results", "configs"]
 
 [project.scripts]
 train = "scripts.cli:train"
+train-baseline = "scripts.cli:train_baseline"
 visualize = "scripts.cli:visualize"
 demo = "scripts.cli:demo"
 analyze = "scripts.cli:analyze"
+list-parsers = "scripts.cli:list_parsers"

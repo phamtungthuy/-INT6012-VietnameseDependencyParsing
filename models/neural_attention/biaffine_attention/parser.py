@@ -1,23 +1,28 @@
+"""BiLSTM + Biaffine Attention Parser
+
+Reference:
+Dozat, T., & Manning, C. D. (2017). Deep biaffine attention for neural dependency parsing. ICLR 2017.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.parser.base_parser import BaseParser
-from models import BiaffineAttention
+from models.neural_attention.base_attention_parser import BaseAttentionParser
+from models.neural_attention.biaffine_attention.attention import BiaffineAttention
 
-class BiLSTMParser(BaseParser):
+class BiaffineAttentionParser(BaseAttentionParser):
     """BiLSTM + Biaffine Attention Parser"""
     def __init__(self, vocab_size, pos_size, embedding_dim=100, pos_dim=50,
                  hidden_dim=400, num_layers=3, arc_dim=500, label_dim=100,
                  num_labels=50, dropout=0.33, use_score_norm=True):
-        super(BiLSTMParser, self).__init__()
+        super(BiaffineAttentionParser, self).__init__()
         
         self.vocab_size = vocab_size
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
         self.num_labels = num_labels
         
-        # Embeddings
         self.word_embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
         self.pos_embedding = nn.Embedding(pos_size, pos_dim, padding_idx=0)
         

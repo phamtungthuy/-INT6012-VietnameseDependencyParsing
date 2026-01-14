@@ -1,5 +1,8 @@
 # Vietnamese Dependency Parser Configuration
 
+# Parser type: bilstm, transition
+parser_type: bilstm
+
 # Model hyperparameters
 model:
   embedding_dim: 100

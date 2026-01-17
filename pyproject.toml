@@ -8,16 +8,10 @@ dependencies = [
     "conllu==6.0.0",
     "loguru==0.7.3",
     "PyYAML==6.0.3",
-    "flask>=3.0.0"
+    "flask>=3.0.0",
+    "transformers>=4.30.0",
 ]
 
-[project.optional-dependencies]
-bert = [
-    "transformers>=4.30.0",
-]
-all = [
-    "transformers>=4.30.0",
-]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -11,7 +11,7 @@ class BaseTraditionalParser(ABC):
     """
     Abstract base class for traditional (non-neural) dependency parsers.
     
-    Unlike neural parsers (BaseParser), traditional parsers use:
+    Traditional parsers use:
     - Hand-crafted features
     - Linear classifiers (Perceptron, SVM)
     - No forward() or loss() methods - training is handled differently

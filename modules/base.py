@@ -152,7 +152,7 @@ class BiLSTM(nn.Module):
         https://openreview.net/forum?id=Hk95PK9le
     """
 
-    def __init__(self, input_size, hidden_size, num_layers=1, dropout=0):
+    def __init__(self, input_size, hidden_size, num_layers=1, dropout: float=0):
         super().__init__()
 
         self.input_size = input_size
@@ -359,7 +359,7 @@ class MLP(nn.Module):
             If non-zero, introduce a :class:`SharedDropout` layer on the output with this dropout ratio. Default: 0.
     """
 
-    def __init__(self, n_in, n_out, dropout=0):
+    def __init__(self, n_in, n_out, dropout: float = 0):
         super().__init__()
 
         self.n_in = n_in

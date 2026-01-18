@@ -15,7 +15,7 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-exclude = ["checkpoints*", "venv*", "data", "logs", "results", "configs"]
+exclude = ["checkpoints*", "venv*", "datasets", "logs", "results"]
 
 [project.scripts]
 train = "scripts.cli:train"

@@ -159,6 +159,7 @@ def chuliu_edmonds(s):
         https://www.aclweb.org/anthology/H05-1066/
     """
 
+    s = s.clone() # Avoid in-place modification of views
     s[0, 1:] = float('-inf')
     # prevent self-loops
     s.diagonal()[1:].fill_(float('-inf'))

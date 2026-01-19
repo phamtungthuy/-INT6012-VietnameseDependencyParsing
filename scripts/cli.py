@@ -3,72 +3,8 @@ from pathlib import Path
 
 from utils.constants import config
 
-# All available neural parser types
-NEURAL_PARSERS = [
-    # Attention-based
-    'biaffine',
-    # Transition-based
-    'chen_manning_2014', 'weiss_2015', 'andor_2016',
-]
-
 # Feature types for biaffine parser
 FEAT_TYPES = ['char', 'bert', 'tag']
-
-
-@click.command()
-@click.option('--parser', '-p', default=None, 
-              type=click.Choice(NEURAL_PARSERS, case_sensitive=False),
-              help='Parser type (overrides config.yaml)')
-@click.option('--resume', default=None, type=str, help='Resume from checkpoint path')
-def train(parser: str, resume: str):
-    """Train the Vietnamese Dependency Parser model.
-    
-    Available parsers:
-    
-    \b
-    ATTENTION-BASED:
-      biaffine         - BiLSTM + Biaffine Attention (Dozat & Manning 2017)
-    
-    \b
-    TRANSITION-BASED:
-      chen_manning_2014 - Greedy local training (Chen & Manning 2014)
-      weiss_2015        - Structured training with beam (Weiss et al. 2015)
-      andor_2016        - Globally normalized (Andor et al. 2016)
-    """
-    from scripts.train import run_training
-    from trainers.train_config import TrainConfig
-    
-    # Parser type: CLI option > config.yaml
-    parser_type = parser or config.get('parser_type', 'biaffine')
-    
-    train_config = TrainConfig(
-        # Parser type
-        parser_type=parser_type,
-        # Model
-        embedding_dim=config['model']['embedding_dim'],
-        pos_dim=config['model']['pos_dim'],
-        hidden_dim=config['model']['hidden_dim'],
-        num_layers=config['model']['num_layers'],
-        arc_dim=config['model']['arc_dim'],
-        label_dim=config['model']['label_dim'],
-        dropout=config['model']['dropout'],
-        # Training
-        batch_size=config['training']['batch_size'],
-        num_epochs=config['training']['num_epochs'],
-        lr=config['training']['lr'],
-        weight_decay=config['training']['weight_decay'],
-        min_freq=config['training']['min_freq'],
-        seed=config['training']['seed'],
-        save_every=config['training']['save_every'],
-        # Paths
-        save_dir=config['paths']['save_dir'],
-        results_dir=config['paths']['results_dir'],
-        # Device
-        device=config['device'],
-        resume=resume,
-    )
-    
-    run_training(train_config)
 
 
 @click.command()
@@ -154,7 +90,7 @@ def train_biaffine(feat: str, bert: str, embed: str, epochs: int, batch_size: in
     from datasets import ViVTBCorpus
     from trainers.dependency_parser_trainer import DependencyParserTrainer
     
-    from models.solution.dependency_parser_v2 import DependencyParser
+    from models.solution.dependency_parser import DependencyParser
     from modules.embeddings import CharacterEmbeddings, FieldEmbeddings
     embeddings = [
         FieldEmbeddings()
@@ -203,8 +139,57 @@ def cli():
     """Vietnamese Dependency Parser CLI"""
 
 
-cli.add_command(train)
+# === Tmp trainer commands ===
+
+@click.command('train-tmp-malt')
+@click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
+def train_tmp_malt(epochs: int):
+    """Train MaltParser from models/tmp (fast version)."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.tmp_trainer import TmpTrainer
+    
+    corpus = ViVTBCorpus()
+    click.echo(f"📊 TMP MaltParser - Epochs: {epochs}")
+    trainer = TmpTrainer(parser_type='malt', corpus=corpus)
+    trainer.train(max_epochs=epochs)
+
+
+@click.command('train-tmp-mst')
+@click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
+def train_tmp_mst(epochs: int):
+    """Train MSTParser from models/tmp (fast version)."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.tmp_trainer import TmpTrainer
+    
+    corpus = ViVTBCorpus()
+    click.echo(f"📊 TMP MSTParser - Epochs: {epochs}")
+    trainer = TmpTrainer(parser_type='mst', corpus=corpus)
+    trainer.train(max_epochs=epochs)
+
+
+@click.command('train-tmp-turbo')
+@click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
+def train_tmp_turbo(epochs: int):
+    """Train TurboParser from models/tmp (fast version)."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.tmp_trainer import TmpTrainer
+    
+    corpus = ViVTBCorpus()
+    click.echo(f"📊 TMP TurboParser - Epochs: {epochs}")
+    trainer = TmpTrainer(parser_type='turbo', corpus=corpus)
+    trainer.train(max_epochs=epochs)
+
+
 cli.add_command(train_biaffine)
+cli.add_command(train_tmp_malt)
+cli.add_command(train_tmp_mst)
+cli.add_command(train_tmp_turbo)
 cli.add_command(visualize)
 cli.add_command(demo)
 cli.add_command(analyze)

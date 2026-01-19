@@ -39,7 +39,7 @@ class Model(torch.nn.Module):
             # load_big_file is a workaround by https://github.com/highway11git to load models on some Mac/Windows setups
             # see https://github.com/zalandoresearch/flair/issues/351
             f = file_utils.load_big_file(str(model_file))
-            state = torch.load(f, map_location='cpu')  # type: ignore[arg-type]
+            state = torch.load(f, map_location='cpu', weights_only=False)  # type: ignore[arg-type]
 
         model = cls._init_model_with_state_dict(state)
         

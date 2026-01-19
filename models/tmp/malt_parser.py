@@ -12,7 +12,7 @@ Features:
 from typing import List, Dict, Tuple, Any
 from collections import defaultdict
 
-from models.traditional.base_traditional_parser import BaseTraditionalParser
+from models.tmp.base_traditional_parser import BaseTraditionalParser
 
 
 def _nested_float_dict():
@@ -200,14 +200,24 @@ class MaltParser(BaseTraditionalParser):
         epochs: int = 10,
         verbose: bool = True
     ) -> 'MaltParser':
+        # Collect all labels first
+        all_labels = set()
+        for sent in sentences:
+            if 'rels' in sent:
+                all_labels.update(sent['rels'])
+        self.labels = sorted(all_labels) if all_labels else []
+        
         for epoch in range(epochs):
             correct = 0
             total = 0
+            label_correct = 0
+            label_total = 0
             
             for sent in sentences:
                 words = sent['words']
                 pos_tags = sent['pos_tags']
                 gold_heads_0idx = [h - 1 for h in sent['heads']]  # Convert to 0-indexed
+                gold_rels = sent.get('rels', [])
                 
                 stack = [-1]  # ROOT
                 buffer = list(range(len(words)))
@@ -233,10 +243,32 @@ class MaltParser(BaseTraditionalParser):
                     
                     stack, buffer, arcs = self._apply_action(oracle, stack, buffer, arcs)
                     self._updates += 1
+                
+                # Train labels online
+                if gold_rels and self.labels:
+                    for dep in range(len(words)):
+                        gold_label = gold_rels[dep]
+                        head = sent['heads'][dep] - 1 if sent['heads'][dep] > 0 else len(words)
+                        lbl_features = self.extract_label_features(words, pos_tags, head, dep)
+                        
+                        scores = {lbl: sum(self.label_weights.get(f"{f}_{lbl}", 0) for f in lbl_features) 
+                                  for lbl in self.labels}
+                        pred_label = max(scores, key=lambda x: scores[x])
+                        
+                        if pred_label != gold_label:
+                            for f in lbl_features:
+                                self.label_weights[f"{f}_{gold_label}"] = \
+                                    self.label_weights.get(f"{f}_{gold_label}", 0) + 1
+                                self.label_weights[f"{f}_{pred_label}"] = \
+                                    self.label_weights.get(f"{f}_{pred_label}", 0) - 1
+                        else:
+                            label_correct += 1
+                        label_total += 1
             
             if verbose:
                 acc = correct / total * 100 if total > 0 else 0
-                print(f"Epoch {epoch + 1}/{epochs} - Action Acc: {acc:.2f}%")
+                las = label_correct / label_total * 100 if label_total > 0 else 0
+                print(f"Epoch {epoch + 1}/{epochs} - Action Acc: {acc:.2f}% | Label Acc: {las:.2f}%")
         
         # Finalize averaged weights
         for f in self.weights:

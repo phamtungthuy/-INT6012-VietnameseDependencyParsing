@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 import torch
 
-from training.base_trainer import BaseTrainer
+from trainers.base_trainer import BaseTrainer
 
 
 class TransitionTrainer(BaseTrainer):

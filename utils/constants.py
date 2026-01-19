@@ -12,7 +12,7 @@ def get_root_path():
 ROOT_PATH = get_root_path()
 
 # Data paths
-DATA_PATH = ROOT_PATH / "data"
+DATA_PATH = ROOT_PATH / "datasets"
 VALIDATION_FILE_PATH = DATA_PATH / "vi_vtb-ud-dev.conllu"
 TEST_FILE_PATH = DATA_PATH / "vi_vtb-ud-test.conllu"
 TRAIN_FILE_PATH = DATA_PATH / "vi_vtb-ud-train.conllu"

@@ -9,8 +9,8 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset
 
 from utils.logs import logger
-from data_processing.vocabulary import Vocabulary
-from data_processing.dependency import DependencyDataset
+from data.vocabulary import Vocabulary
+from data.dependency import DependencyDataset
 
 class CoNLLUDataset:
     def __init__(self, file_path: Path):

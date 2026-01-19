@@ -11,6 +11,9 @@ NEURAL_PARSERS = [
     'chen_manning_2014', 'weiss_2015', 'andor_2016',
 ]
 
+# Feature types for biaffine parser
+FEAT_TYPES = ['char', 'bert', 'tag']
+
 
 @click.command()
 @click.option('--parser', '-p', default=None, 
@@ -33,7 +36,7 @@ def train(parser: str, resume: str):
       andor_2016        - Globally normalized (Andor et al. 2016)
     """
     from scripts.train import run_training
-    from training import TrainConfig
+    from trainers.train_config import TrainConfig
     
     # Parser type: CLI option > config.yaml
     parser_type = parser or config.get('parser_type', 'biaffine')
@@ -94,62 +97,105 @@ def demo(host: str, port: int, debug: bool, model: str, vocab: Path):
 @click.command()
 def analyze():
     """Analyze dataset to recommend optimal hyperparameters (e.g., min_freq)."""
-    from data_processing.analyzer import Analyzer
+    from data.analyzer import Analyzer
     
     analyzer = Analyzer()
     recommended = analyzer.print_analysis_report()
     click.echo(f"\n🎯 Suggested min_freq for config.yaml: {recommended}")
 
 
-@click.command('train-baseline')
-@click.option('--parser', '-p', default='malt', type=click.Choice(['malt', 'mst', 'turbo']),
-              help='Traditional parser type')
-@click.option('--epochs', '-e', default=10, type=int, help='Number of training epochs')
-@click.option('--save-dir', '-s', default='checkpoints/traditional', help='Save directory')
-def train_baseline(parser: str, epochs: int, save_dir: str):
-    """Train traditional (non-neural) dependency parsers.
+@click.command('train-biaffine')
+@click.option('--feat', '-f', default='char', type=click.Choice(FEAT_TYPES, case_sensitive=False),
+              help='Feature type: char (CharLSTM), bert (BERT embeddings), tag (POS tags)')
+@click.option('--bert', '-b', default='bert-base-multilingual-cased',
+              help='BERT model name (only used when --feat=bert)')
+@click.option('--embed', '-e', default=None, type=str,
+              help='Path to pretrained word embeddings (e.g., word2vec, fastText)')
+@click.option('--epochs', default=100, type=int, help='Maximum number of epochs')
+@click.option('--batch-size', default=5000, type=int, help='Batch size (in tokens)')
+@click.option('--lr', default=2e-3, type=float, help='Learning rate')
+@click.option('--save-path', '-s', default='checkpoints/biaffine_model.pt',
+              help='Path to save the best model')
+@click.option('--min-freq', default=2, type=int, help='Minimum word frequency')
+@click.option('--patience', default=100, type=int, help='Early stopping patience')
+def train_biaffine(feat: str, bert: str, embed: str, epochs: int, batch_size: int,
+                   lr: float, save_path: str, min_freq: int, patience: int):
+    """Train Biaffine Dependency Parser (Dozat & Manning 2017).
+    
+    This uses the DependencyParserTrainer from the solution module,
+    which provides a complete training pipeline with advanced features.
     
     \b
-    TRADITIONAL PARSERS:
-      malt  - MaltParser (Nivre et al. 2006) - Transition-based
-      mst   - MSTParser (McDonald et al. 2005) - Graph-based MST
-      turbo - TurboParser (Martins et al. 2010) - Dual decomposition
-    """
-    from scripts.train_traditional import run_traditional_training
+    FEATURE TYPES:
+      char  - Character-level LSTM embeddings (default, recommended)
+      bert  - BERT contextual embeddings (requires transformers)
+      tag   - POS tag embeddings only
     
-    run_traditional_training(
-        parser_type=parser,
-        epochs=epochs,
-        save_dir=save_dir,
+    \b
+    EXAMPLES:
+      # Train with character embeddings (default)
+      parsing train-biaffine
+      
+      # Train with BERT embeddings
+      parsing train-biaffine --feat bert --bert vinai/phobert-base
+      
+      # Train with pretrained word embeddings
+      parsing train-biaffine --embed path/to/embeddings.txt
+      
+      # Custom training settings
+      parsing train-biaffine --epochs 50 --batch-size 3000 --lr 1e-3
+    """
+    from dataclasses import dataclass
+    
+    # Import corpus directly to avoid loader dependency issues
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.dependency_parser_trainer import DependencyParserTrainer
+    
+    from models.solution.dependency_parser_v2 import DependencyParser
+    from modules.embeddings import CharacterEmbeddings, FieldEmbeddings
+    embeddings = [
+        FieldEmbeddings()
+    ]
+    parser = DependencyParser(
+        embeddings=embeddings, init_pre_train=True,
+        feat='bert',
+        bert='vinai/phobert-base',
+        n_feat_embed=768)
+    # Load Vietnamese Treebank corpus
+    corpus = ViVTBCorpus()
+    
+    click.echo(f"📊 Configuration:")
+    click.echo(f"   Feature type: {feat}")
+    if feat.lower() == 'bert':
+        click.echo(f"   BERT model: {bert}")
+    if embed:
+        click.echo(f"   Pretrained embeddings: {embed}")
+    click.echo(f"   Epochs: {epochs}")
+    click.echo(f"   Batch size: {batch_size}")
+    click.echo(f"   Learning rate: {lr}")
+    click.echo(f"   Min frequency: {min_freq}")
+    click.echo(f"   Patience: {patience}")
+    click.echo(f"   Save path: {save_path}")
+    click.echo()
+    
+    
+    # Create trainer and start training
+    trainer = DependencyParserTrainer(parser=parser, corpus=corpus)
+    
+    trainer.train(
+        base_path=save_path,
+        min_freq=min_freq,
+        batch_size=batch_size,
+        lr=lr,
+        max_epochs=epochs,
+        patience=patience,
+        
     )
-
-
-@click.command('list-parsers')
-def list_parsers():
-    """List all available parser types."""
-    click.echo("""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                     Available Dependency Parsers                             ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  🧠 NEURAL ATTENTION-BASED (use: train -p <name>)                            ║
-║  ────────────────────────────────────────────────────────────────────────    ║
-║  biaffine           BiLSTM + Biaffine (Dozat & Manning 2017)                 ║
-║                                                                              ║
-║  🔄 NEURAL TRANSITION-BASED (use: train -p <name>)                           ║
-║  ────────────────────────────────────────────────────────────────────────    ║
-║  chen_manning_2014  Greedy local training (Chen & Manning 2014)              ║
-║  weiss_2015         Structured + Beam search (Weiss et al. 2015)             ║
-║  andor_2016         Globally normalized (Andor et al. 2016)                  ║
-║                                                                              ║
-║  📊 TRADITIONAL (non-neural) (use: train-baseline -p <name>)                 ║
-║  ────────────────────────────────────────────────────────────────────────    ║
-║  malt               MaltParser - Transition-based (Nivre et al. 2006)        ║
-║  mst                MSTParser - Maximum Spanning Tree (McDonald et al. 2005) ║
-║  turbo              TurboParser - Dual decomposition (Martins et al. 2010)   ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-    """)
+    
+    click.echo(f"\n✅ Training complete! Model saved to: {save_path}")
 
 
 @click.group()
@@ -158,12 +204,10 @@ def cli():
 
 
 cli.add_command(train)
-cli.add_command(train_baseline)
+cli.add_command(train_biaffine)
 cli.add_command(visualize)
 cli.add_command(demo)
 cli.add_command(analyze)
-cli.add_command(list_parsers)
-
 
 def main():
     cli()

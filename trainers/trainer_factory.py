@@ -5,9 +5,9 @@ Trainer Factory - creates appropriate trainer for each parser type
 from enum import Enum
 from typing import Dict, Type
 
-from training.base_trainer import BaseTrainer
-from training.bilstm_trainer import BiLSTMTrainer
-from training.transition_trainer import TransitionTrainer
+from trainers.base_trainer import BaseTrainer
+from trainers.bilstm_trainer import BiLSTMTrainer
+from trainers.transition_trainer import TransitionTrainer
 
 
 class TrainerType(Enum):

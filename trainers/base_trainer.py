@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from utils.logs import train_logger
-from data_processing import Vocabulary
+from data import Vocabulary
 from evaluation import Evaluator
 
 

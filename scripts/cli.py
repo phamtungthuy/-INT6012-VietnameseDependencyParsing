@@ -598,6 +598,39 @@ def test_jointtagger(model_path):
     click.echo(f"   {metric}")
 
 
+@click.command('train-triaffine-full')
+@click.option('--epochs', default=20, type=int)
+@click.option('--batch-size', default=3000, type=int)
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
+@click.option('--mf-iterations', default=3, type=int, help='Mean-Field iterations for decoding')
+@click.option('--embed', default=None, help='Path to pretrained embeddings')
+@click.option('--save-path', '-s', default='checkpoints/triaffine_full.pt')
+def train_triaffine_full(epochs, batch_size, lr, bert_lr, mf_iterations, embed, save_path):
+    """Train Full Triaffine Parser with Second-Order Scoring + Mean-Field"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.triaffine_full_trainer import TriaffineFullTrainer
+    
+    click.echo("🔬 Training Full Triaffine Parser (Second-Order + Mean-Field)")
+    click.echo(f"   Mean-Field iterations: {mf_iterations}")
+    corpus = ViVTBCorpus()
+    trainer = TriaffineFullTrainer(corpus)
+    trainer.train(
+        base_path=save_path, 
+        embed=embed, 
+        max_epochs=epochs, 
+        batch_size=batch_size, 
+        lr=lr, 
+        bert_lr=bert_lr,
+        n_mf_iterations=mf_iterations
+    )
+    click.echo(f"✅ Done! Model saved to: {save_path}")
+
+
+cli.add_command(train_triaffine_full)
 cli.add_command(test_jointtagger)
 
 

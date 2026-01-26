@@ -227,10 +227,175 @@ def test_biaffine_v2(model_path: str, batch_size: int):
     click.echo(f"   UAS: {metric.uas:.2%}")
     click.echo(f"   LAS: {metric.las:.2%}")
 
+
+@click.command('train-neural-parser')
+@click.option('--epochs', default=10, type=int, help='Number of epochs')
+@click.option('--batch-size', default=1000, type=int, help='Batch size')
+@click.option('--lr', default=0.01, type=float, help='Learning rate')
+@click.option('--hidden-dim', default=200, type=int, help='Hidden layer dimension')
+@click.option('--word-embed-dim', default=50, type=int, help='Word embedding dimension')
+@click.option('--save-path', '-s', default='checkpoints/neural_parser.pt',
+              help='Path to save the model')
+def train_neural_parser(epochs: int, batch_size: int, lr: float, 
+                        hidden_dim: int, word_embed_dim: int, save_path: str):
+    """Train Neural Transition-based Parser (Chen & Manning 2014).
+    
+    This parser uses:
+    - Arc-Standard transition system (SHIFT, LEFT-ARC, RIGHT-ARC)
+    - Feedforward neural network with cube activation
+    - Word, POS tag, and arc label embeddings
+    """
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.neural_trainer import NeuralTransitionTrainer
+    from models.transition_based.neural_parser import NeuralTransitionParser
+    
+    click.echo("🧠 Training Neural Transition Parser (Chen & Manning 2014)")
+    click.echo(f"📊 Configuration:")
+    click.echo(f"   Epochs: {epochs}")
+    click.echo(f"   Batch size: {batch_size}")
+    click.echo(f"   Learning rate: {lr}")
+    click.echo(f"   Hidden dim: {hidden_dim}")
+    click.echo(f"   Word embed dim: {word_embed_dim}")
+    click.echo(f"   Save path: {save_path}")
+    click.echo()
+    
+    corpus = ViVTBCorpus()
+    parser = NeuralTransitionParser(
+        n_words=1, n_tags=1, n_rels=1, n_actions=1  # Placeholders, set by trainer
+    )
+    
+    trainer = NeuralTransitionTrainer(parser=parser, corpus=corpus)
+    trainer.train(
+        base_path=save_path,
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        hidden_dim=hidden_dim,
+        word_embed_dim=word_embed_dim
+    )
+    
+    click.echo(f"\n✅ Training complete! Model saved to: {save_path}")
+
+
+@click.command('train-biaffine-v3')
+@click.option('--epochs', default=20, type=int, help='Number of epochs')
+@click.option('--batch-size', default=3000, type=int, help='Batch size (in tokens)')
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
+@click.option('--save-path', '-s', default='checkpoints/biaffine_model_v3.pt',
+              help='Path to save the model')
+def train_biaffine_v3(epochs: int, batch_size: int, lr: float, bert_lr: float, save_path: str):
+    """Train Joint POS Tagger + Biaffine Parser V3.
+    
+    This is the most advanced architecture with:
+    - Tagger branch: BERT → BiLSTM → MLP → POS Tags
+    - Parser branch: (BERT ⊕ Tag) → BiLSTM → Biaffine → Parse Tree
+    - Joint training with scheduled sampling
+    """
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.biaffine_trainer_v3 import BiaffineTrainerV3
+    from models.graph_based.biaffine_parser_v3 import BiaffineParserV3
+    
+    click.echo("🧬 Training Joint Tagger + Biaffine Parser V3")
+    click.echo(f"📊 Configuration:")
+    click.echo(f"   Architecture: BERT → Tagger Branch + Parser Branch (Joint)")
+    click.echo(f"   BERT model: vinai/phobert-base")
+    click.echo(f"   Epochs: {epochs}")
+    click.echo(f"   Batch size: {batch_size}")
+    click.echo(f"   LR (General): {lr}")
+    click.echo(f"   LR (BERT): {bert_lr}")
+    click.echo(f"   Save path: {save_path}")
+    click.echo()
+    
+    corpus = ViVTBCorpus()
+    parser = BiaffineParserV3(
+        n_tags=1, n_rels=1,  # Placeholders
+        init_pre_train=True
+    )
+    parser.bert_name = 'vinai/phobert-base'
+    
+    trainer = BiaffineTrainerV3(parser=parser, corpus=corpus)
+    trainer.train(
+        base_path=save_path,
+        max_epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        bert_lr=bert_lr
+    )
+    
+    click.echo(f"\n✅ Training V3 complete! Model saved to: {save_path}")
+
+
+
+@click.command('train-triaffine')
+@click.option('--epochs', default=20, type=int, help='Number of epochs')
+@click.option('--batch-size', default=3000, type=int, help='Batch size (in tokens)')
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
+@click.option('--embed', default=None, help='Path to pretrained embeddings (e.g. cc.vi.300.vec)')
+@click.option('--save-path', '-s', default='checkpoints/triaffine_model.pt',
+              help='Path to save the model')
+def train_triaffine(epochs: int, batch_size: int, lr: float, bert_lr: float, embed: str, save_path: str):
+    """Train Triaffine Parser (Second-Order with Sibling Attention).
+    
+    This is the most advanced architecture with:
+    - Global context via BiLSTM
+    - Sibling features via mlp_sibling + Triaffine scoring
+    - BERT for contextual embeddings
+    - Optional Word Embeddings (FastText) if --embed is provided
+    """
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.triaffine_trainer import TriaffineTrainer
+    from models.graph_based.triaffine_parser import TriaffineParser
+    
+    click.echo("🔺 Training Triaffine Parser (Second-Order + Sibling Attention)")
+    click.echo(f"📊 Configuration:")
+    click.echo(f"   Architecture: BERT → BiLSTM → [MLP_head, MLP_dep, MLP_sib] → Triaffine")
+    click.echo(f"   BERT model: vinai/phobert-base")
+    click.echo(f"   Embeddings: {embed if embed else 'None (Pure BERT)'}")
+    click.echo(f"   Epochs: {epochs}")
+    click.echo(f"   Batch size: {batch_size}")
+    click.echo(f"   LR (General): {lr}")
+    click.echo(f"   LR (BERT): {bert_lr}")
+    click.echo(f"   Save path: {save_path}")
+    click.echo()
+    
+    corpus = ViVTBCorpus()
+    parser = TriaffineParser(
+        n_rels=1,
+        init_pre_train=True
+    )
+    parser.bert_name = 'vinai/phobert-base'
+    
+    trainer = TriaffineTrainer(parser=parser, corpus=corpus)
+    trainer.train(
+        base_path=save_path,
+        embed=embed,
+        max_epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+        bert_lr=bert_lr
+    )
+    
+    click.echo(f"\n✅ Training Triaffine complete! Model saved to: {save_path}")
+
+
 cli.add_command(train_biaffine)
 cli.add_command(train_biaffine_v2)
 cli.add_command(test_biaffine_v2)
+cli.add_command(train_biaffine_v3)
+cli.add_command(train_triaffine)
 cli.add_command(train_malt_parser)
+cli.add_command(train_neural_parser)
 
 def main():
     cli()

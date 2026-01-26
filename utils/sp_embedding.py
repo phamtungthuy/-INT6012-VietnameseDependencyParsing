@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import numpy as np
 import torch
 
 from utils.logs import logger
@@ -8,7 +9,7 @@ class Embedding(object):
 
     def __init__(self, tokens, vectors, unk=None):
         self.tokens = tokens
-        self.vectors = torch.tensor(vectors)
+        self.vectors = torch.tensor(np.array(vectors), dtype=torch.float32)
         self.pretrained = {w: v for w, v in zip(tokens, vectors)}
         self.unk = unk
 
@@ -32,10 +33,16 @@ class Embedding(object):
     @classmethod
     def load(cls, path, unk=None):
         with open(path, 'r', encoding="utf-8") as f:
-            lines = [line for line in f]
+            lines = [line.strip() for line in f]
+        
+        # Skip header if present (usually 2 numbers: count and dim)
+        if len(lines) > 0:
+            first_line = lines[0].split()
+            if len(first_line) == 2:
+                lines = lines[1:]
+                
         splits = [line.split() for line in lines]
         tokens, vectors = zip(*[(s[0], list(map(float, s[1:])))
                                 for s in splits])
 
-        logger.info(f"Skipped {errors} lines due to parsing errors.")
         return cls(tokens, vectors, unk=unk)

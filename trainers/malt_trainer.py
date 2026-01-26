@@ -12,7 +12,7 @@ from utils.constants import pad, unk, bos
 from utils.sp_metric import Metric, AttachmentMetric
 
 from transforms.conll import CoNLL, progress_bar
-from models.traditional.malt_parser import MaltParser
+from models.transition_based.malt_parser import MaltParser
 from datasets import ViVTBCorpus
 
 class MaltTrainer:

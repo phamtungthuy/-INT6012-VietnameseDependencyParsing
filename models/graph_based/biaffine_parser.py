@@ -21,7 +21,7 @@ from utils.sp_alg import eisner, mst
 from utils.constants import PRETRAINED
 from utils.sp_metric import AttachmentMetric
 
-class DependencyParser(Model):
+class BiaffineParser(Model):
     r"""
     The implementation of Biaffine Dependency Parser.
 
@@ -63,7 +63,7 @@ class DependencyParser(Model):
             init_pre_train=False,
             transform=None
     ):
-        super(DependencyParser, self).__init__()
+        super(BiaffineParser, self).__init__()
         self.embed = embed
         self.feat = feat
         self.bert = bert
@@ -266,7 +266,7 @@ class DependencyParser(Model):
         args = state['args']
         transform = state['transform']
         embeddings = state['embeddings']
-        model = DependencyParser(
+        model = BiaffineParser(
             n_words=args['n_words'],
             n_feats=args['n_feats'],
             n_rels=args['n_rels'],

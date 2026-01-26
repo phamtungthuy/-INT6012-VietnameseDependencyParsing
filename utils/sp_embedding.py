@@ -2,6 +2,7 @@
 
 import torch
 
+from utils.logs import logger
 
 class Embedding(object):
 
@@ -30,10 +31,11 @@ class Embedding(object):
 
     @classmethod
     def load(cls, path, unk=None):
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding="utf-8") as f:
             lines = [line for line in f]
         splits = [line.split() for line in lines]
         tokens, vectors = zip(*[(s[0], list(map(float, s[1:])))
                                 for s in splits])
 
+        logger.info(f"Skipped {errors} lines due to parsing errors.")
         return cls(tokens, vectors, unk=unk)

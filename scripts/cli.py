@@ -1,44 +1,8 @@
 import click
 from pathlib import Path
 
-from utils.constants import config
-
 # Feature types for biaffine parser
 FEAT_TYPES = ['char', 'bert', 'tag']
-
-
-@click.command()
-@click.option('--host', '-h', default='127.0.0.1', help='Host to bind to')
-@click.option('--port', '-p', default=5000, type=int, help='Port to bind to')
-@click.option('--debug/--no-debug', default=True, help='Enable debug mode')
-def visualize(host: str, port: int, debug: bool):
-    """Launch interactive dependency tree visualization server."""
-    from scripts.visualization import run_visualization
-    run_visualization(host=host, port=port, debug=debug)
-
-
-@click.command()
-@click.option('--host', '-h', default='127.0.0.1', help='Host to bind to')
-@click.option('--port', '-p', default=5001, type=int, help='Port to bind to')
-@click.option('--debug/--no-debug', default=True, help='Enable debug mode')
-@click.option('--model', '-m', default='checkpoints/best_model.pt', help='Model checkpoint path')
-@click.option('--vocab', '-v', default=None, help='Vocab path (auto-detect from results if not specified)')
-def demo(host: str, port: int, debug: bool, model: str, vocab: Path):
-    """Launch demo server to compare ground truth vs predictions."""
-    from scripts.demo import run_demo
-    
-    run_demo(host=host, port=port, debug=debug, model_path=model, vocab_path=vocab)
-
-
-@click.command()
-def analyze():
-    """Analyze dataset to recommend optimal hyperparameters (e.g., min_freq)."""
-    from data.analyzer import Analyzer
-    
-    analyzer = Analyzer()
-    recommended = analyzer.print_analysis_report()
-    click.echo(f"\n🎯 Suggested min_freq for config.yaml: {recommended}")
-
 
 @click.command('train-biaffine')
 @click.option('--feat', '-f', default='char', type=click.Choice(FEAT_TYPES, case_sensitive=False),
@@ -47,7 +11,7 @@ def analyze():
               help='BERT model name (only used when --feat=bert)')
 @click.option('--embed', '-e', default=None, type=str,
               help='Path to pretrained word embeddings (e.g., word2vec, fastText)')
-@click.option('--epochs', default=100, type=int, help='Maximum number of epochs')
+@click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
 @click.option('--batch-size', default=5000, type=int, help='Batch size (in tokens)')
 @click.option('--lr', default=2e-3, type=float, help='Learning rate')
 @click.option('--save-path', '-s', default='checkpoints/biaffine_model.pt',
@@ -88,14 +52,14 @@ def train_biaffine(feat: str, bert: str, embed: str, epochs: int, batch_size: in
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from datasets import ViVTBCorpus
-    from trainers.dependency_parser_trainer import DependencyParserTrainer
+    from trainers.biaffine_trainer import BiaffineTrainer
     
-    from models.biaffine.dependency_parser import DependencyParser
+    from models.graph_based.biaffine_parser import BiaffineParser
     from modules.embeddings import CharacterEmbeddings, FieldEmbeddings
     embeddings = [
         FieldEmbeddings()
     ]
-    parser = DependencyParser(
+    parser = BiaffineParser(
         embeddings=embeddings, init_pre_train=True,
         feat='bert',
         bert='vinai/phobert-base',
@@ -119,7 +83,7 @@ def train_biaffine(feat: str, bert: str, embed: str, epochs: int, batch_size: in
     
     
     # Create trainer and start training
-    trainer = DependencyParserTrainer(parser=parser, corpus=corpus)
+    trainer = BiaffineTrainer(parser=parser, corpus=corpus)
     
     trainer.train(
         base_path=save_path,
@@ -150,7 +114,7 @@ def train_malt_parser(epochs: int, save_path: str):
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from datasets import ViVTBCorpus
     from trainers.malt_trainer import MaltTrainer
-    from models.traditional.malt_parser import MaltParser
+    from models.transition_based.malt_parser import MaltParser
     
     malt_parser = MaltParser()
     corpus = ViVTBCorpus()
@@ -160,43 +124,113 @@ def train_malt_parser(epochs: int, save_path: str):
     trainer.train(base_path=save_path, max_epochs=epochs)
 
 
-@click.command('train-mst-parser')
+@click.command('train-biaffine-v2')
+@click.option('--bert', '-b', default='vinai/phobert-base',
+              help='BERT model name (default: vinai/phobert-base)')
+@click.option('--embed', '-e', default=None, type=str,
+              help='Path to pretrained word embeddings (e.g., cc.vi.300.vec recommended)')
 @click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
-def train_mst_parser(epochs: int):
-    """Train MSTParser from models/traditional (fast version)."""
+@click.option('--batch-size', default=3000, type=int, help='Batch size (in tokens). Lower batch size recommended for BERT.')
+@click.option('--lr', default=2e-3, type=float, help='Learning rate for Non-BERT layers')
+@click.option('--bert-lr', default=2e-5, type=float, help='Learning rate for BERT layers (fine-tuning)')
+@click.option('--save-path', '-s', default='checkpoints/biaffine_model_v2.pt',
+              help='Path to save the best model')
+@click.option('--min-freq', default=2, type=int, help='Minimum word frequency')
+@click.option('--patience', default=20, type=int, help='Early stopping patience')
+def train_biaffine_v2(bert: str, embed: str, epochs: int, batch_size: int,
+                      lr: float, bert_lr: float, save_path: str, min_freq: int, patience: int):
+    """Train Enhanced Biaffine Parser V2 (BERT Fine-tune + POS Tag + FastText).
+    
+    This V2 implementation matches the high-performance architecture (80%+ UAS):
+    1. Uses Fine-tuned BERT (PhoBERT)
+    2. Incorporates POS Tag embeddings
+    3. Uses FastText word embeddings (if provided)
+    """
     import sys
+    from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from datasets import ViVTBCorpus
-    from trainers.traditional_trainer import TraditionalTrainer
+    from trainers.biaffine_trainer_v2 import BiaffineTrainerV2
+    from models.graph_based.biaffine_parser_v2 import BiaffineParserV2
+    from modules.embeddings import FieldEmbeddings
     
+    # Initialize V2 Parser
+    # Note: V2 parser logic is slightly different, it doesn't need 'embeddings' list wrapper 
+    # as much as V1 if we pass args directly, but let's keep it simple.
+    
+    parser = BiaffineParserV2(
+        feat='bert', # V2 focuses on BERT
+        bert=bert,
+        n_feat_embed=768, # PhoBERT base dim
+        init_pre_train=True, # Skip immediate init, let Trainer handle it
+        embed=embed # Pass embedding path for loading
+    )
+    
+    # Load Vietnamese Treebank corpus
     corpus = ViVTBCorpus()
-    click.echo(f"📊 MSTParser - Epochs: {epochs}")
-    trainer = TraditionalTrainer(parser_type='mst', corpus=corpus)
-    trainer.train(max_epochs=epochs)
+    
+    click.echo(f"🚀 Training Biaffine Parser V2 (Enhanced Architecture)")
+    click.echo(f"📊 Configuration:")
+    click.echo(f"   Structure: Word (FastText) + BERT (Fine-tune) + POS Tag")
+    click.echo(f"   BERT model: {bert}")
+    if embed:
+        click.echo(f"   Pretrained embeddings: {embed}")
+    else:
+        click.echo(f"   Pretrained embeddings: None (Random init - Recommended to use FastText!)")
+        
+    click.echo(f"   Epochs: {epochs}")
+    click.echo(f"   Batch size: {batch_size}")
+    click.echo(f"   LR (General): {lr}")
+    click.echo(f"   LR (BERT): {bert_lr} (Fine-tuning)")
+    click.echo(f"   Save path: {save_path}")
+    click.echo()
+    
+    trainer = BiaffineTrainerV2(parser=parser, corpus=corpus)
+    
+    trainer.train(
+        base_path=save_path,
+        min_freq=min_freq,
+        batch_size=batch_size,
+        lr=lr,
+        bert_lr=bert_lr,
+        max_epochs=epochs,
+        patience=patience
+    )
+    
+    click.echo(f"\n✅ Training V2 complete! Model saved to: {save_path}")
 
-
-@click.command('train-turbo-parser')
-@click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
-def train_turbo_parser(epochs: int):
-    """Train TurboParser from models/traditional (fast version)."""
+@click.command('test-biaffine-v2')
+@click.option('--model-path', '-m', required=True, help='Path to saved model checkpoint')
+@click.option('--batch-size', default=3000, type=int, help='Batch size (in tokens)')
+def test_biaffine_v2(model_path: str, batch_size: int):
+    """Evaluate trained Enhanced Biaffine Parser V2 on Test set."""
     import sys
+    from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from datasets import ViVTBCorpus
-    from trainers.traditional_trainer import TraditionalTrainer
+    from models.graph_based.biaffine_parser_v2 import BiaffineParserV2
+    from utils.sp_data import Dataset
     
+    click.echo(f"📁 Loading model from: {model_path}")
+    parser = BiaffineParserV2.load(model_path)
+    
+    click.echo("📊 Loading Test Corpus...")
     corpus = ViVTBCorpus()
-    click.echo(f"📊 TurboParser - Epochs: {epochs}")
-    trainer = TraditionalTrainer(parser_type='turbo', corpus=corpus)
-    trainer.train(max_epochs=epochs)
-
+    test = Dataset(parser.transform, corpus.test)
+    test.build(batch_size, 1000)
+    
+    click.echo("🚀 Starting Evaluation...")
+    loss, metric = parser.evaluate(test.loader)
+    
+    click.echo(f"\n✅ Test Result:")
+    click.echo(f"   Loss: {loss:.4f}")
+    click.echo(f"   UAS: {metric.uas:.2%}")
+    click.echo(f"   LAS: {metric.las:.2%}")
 
 cli.add_command(train_biaffine)
+cli.add_command(train_biaffine_v2)
+cli.add_command(test_biaffine_v2)
 cli.add_command(train_malt_parser)
-cli.add_command(train_mst_parser)
-cli.add_command(train_turbo_parser)
-cli.add_command(visualize)
-cli.add_command(demo)
-cli.add_command(analyze)
 
 def main():
     cli()

@@ -183,6 +183,7 @@ class TriaffineParser(Model):
             self.tag_embed = nn.Embedding(n_tags, n_tag_embed)
             lstm_input_size = bert_hidden_size + n_tag_embed
         else:
+            logger.info(f"Not using POS tag embedding")
             self.tag_embed = None
             lstm_input_size = bert_hidden_size
         
@@ -216,6 +217,7 @@ class TriaffineParser(Model):
         
         # NEW: MLP for Sibling
         if use_sibling:
+            logger.info(f"Using sibling features with {n_mlp_sib} dimensions")
             self.mlp_arc_s = MLP(n_in=n_lstm_hidden * 2, n_out=n_mlp_arc, dropout=mlp_dropout)
         
         # =====================================================================

@@ -397,9 +397,105 @@ cli.add_command(train_triaffine)
 cli.add_command(train_malt_parser)
 cli.add_command(train_neural_parser)
 
+
+# ============================================================================
+# ABLATION STUDY COMMANDS
+# ============================================================================
+
+@click.command('train-ablation-multihead')
+@click.option('--epochs', default=20, type=int)
+@click.option('--batch-size', default=3000, type=int)
+@click.option('--embed', default=None, help='Path to pretrained embeddings')
+@click.option('--save-path', '-s', default='checkpoints/ablation_multihead.pt')
+def train_ablation_multihead(epochs, batch_size, embed, save_path):
+    """Ablation: Multi-Head Biaffine (4 heads)"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.ablation_trainer import AblationTrainer
+    from models.graph_based.ablation.triaffine_multihead import TriaffineMultiHead
+    
+    click.echo("🔬 Ablation Study: Multi-Head Biaffine")
+    corpus = ViVTBCorpus()
+    trainer = AblationTrainer(TriaffineMultiHead, corpus, 'MultiHead')
+    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size)
+    click.echo(f"✅ Done! Model saved to: {save_path}")
+
+
+@click.command('train-ablation-scalarmix')
+@click.option('--epochs', default=20, type=int)
+@click.option('--batch-size', default=3000, type=int)
+@click.option('--embed', default=None, help='Path to pretrained embeddings')
+@click.option('--save-path', '-s', default='checkpoints/ablation_scalarmix.pt')
+def train_ablation_scalarmix(epochs, batch_size, embed, save_path):
+    """Ablation: Scalar Mix (all 12 BERT layers)"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.ablation_trainer import AblationTrainer
+    from models.graph_based.ablation.triaffine_scalarmix import TriaffineScalarMix
+    
+    click.echo("🔬 Ablation Study: Scalar Mix (12 BERT layers)")
+    corpus = ViVTBCorpus()
+    trainer = AblationTrainer(TriaffineScalarMix, corpus, 'ScalarMix')
+    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size)
+    click.echo(f"✅ Done! Model saved to: {save_path}")
+
+
+@click.command('train-ablation-charlstm')
+@click.option('--epochs', default=20, type=int)
+@click.option('--batch-size', default=3000, type=int)
+@click.option('--embed', default=None, help='Path to pretrained embeddings')
+@click.option('--save-path', '-s', default='checkpoints/ablation_charlstm.pt')
+def train_ablation_charlstm(epochs, batch_size, embed, save_path):
+    """Ablation: Character-level LSTM"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.ablation_trainer import AblationTrainer
+    from models.graph_based.ablation.triaffine_charlstm import TriaffineCharLSTM
+    
+    click.echo("🔬 Ablation Study: Character LSTM")
+    corpus = ViVTBCorpus()
+    trainer = AblationTrainer(TriaffineCharLSTM, corpus, 'CharLSTM')
+    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size)
+    click.echo(f"✅ Done! Model saved to: {save_path}")
+
+
+@click.command('train-ablation-combined')
+@click.option('--epochs', default=20, type=int)
+@click.option('--batch-size', default=3000, type=int)
+@click.option('--embed', default=None, help='Path to pretrained embeddings')
+@click.option('--save-path', '-s', default='checkpoints/ablation_combined.pt')
+def train_ablation_combined(epochs, batch_size, embed, save_path):
+    """Ablation: Multi-Head + Scalar Mix combined"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.ablation_trainer import AblationTrainer
+    from models.graph_based.ablation.triaffine_multihead_scalarmix import TriaffineMultiHeadScalarMix
+    
+    click.echo("🔬 Ablation Study: Multi-Head + Scalar Mix")
+    corpus = ViVTBCorpus()
+    trainer = AblationTrainer(TriaffineMultiHeadScalarMix, corpus, 'MultiHead+ScalarMix')
+    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size)
+    click.echo(f"✅ Done! Model saved to: {save_path}")
+
+
+cli.add_command(train_ablation_multihead)
+cli.add_command(train_ablation_scalarmix)
+cli.add_command(train_ablation_charlstm)
+cli.add_command(train_ablation_combined)
+
+
 def main():
     cli()
 
 
 if __name__ == "__main__":
     main()
+

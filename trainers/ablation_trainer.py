@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Trainer for Triaffine Parser (Second-Order Graph-based with Sibling Attention)
+Unified Trainer for Ablation Study Variants
 """
 
 import os
@@ -22,20 +22,27 @@ from utils.sp_field import Field, SubwordField
 from utils.constants import pad, unk, bos
 from utils.sp_metric import AttachmentMetric
 from utils.sp_parallel import DistributedDataParallel as DDP, is_master
-from models.graph_based.triaffine_parser import TriaffineParser
 
 
-class TriaffineTrainer:
-    """Trainer for Triaffine Parser"""
+class AblationTrainer:
+    """Unified Trainer for all Ablation Study Variants."""
     
-    def __init__(self, parser, corpus):
-        self.parser = parser
+    def __init__(self, parser_cls, corpus, variant_name):
+        """
+        Args:
+            parser_cls: Parser class (e.g., TriaffineMultiHead)
+            corpus: Corpus object with train/dev/test
+            variant_name: Name for logging
+        """
+        self.parser_cls = parser_cls
         self.corpus = corpus
+        self.variant_name = variant_name
     
     def train(
         self,
         base_path: Union[Path, str],
-        embed=None,  # NEW: path to pretrained embeddings
+        bert='vinai/phobert-base',
+        embed=None,
         fix_len=20,
         min_freq=2,
         buckets=1000,
@@ -50,13 +57,12 @@ class TriaffineTrainer:
         decay_steps=5000,
         patience=100,
         max_epochs=20,
-        wandb=None
+        **parser_kwargs  # Additional kwargs for specific variants
     ):
-        """Train the Triaffine parser."""
-        bert = self.parser.bert_name if hasattr(self.parser, 'bert_name') else 'vinai/phobert-base'
+        """Train the parser."""
         os.makedirs(os.path.dirname(base_path), exist_ok=True)
         
-        logger.info("Building the fields")
+        logger.info(f"[{self.variant_name}] Building the fields")
         
         from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(bert)
@@ -70,17 +76,13 @@ class TriaffineTrainer:
                            tokenize=tokenizer.tokenize)
         FEAT.vocab = tokenizer.get_vocab()
         
-        # NEW: Add TAG field (like V2)
         TAG = Field('tags', bos=bos)
-        
         ARC = Field('arcs', bos=bos, use_vocab=False, fn=CoNLL.get_arcs)
         REL = Field('rels', bos=bos)
         
-        # Include CPOS for TAG
         transform = CoNLL(FORM=(WORD, FEAT), CPOS=TAG, HEAD=ARC, DEPREL=REL)
         
         # Build vocabularies
-        # Load pretrained embeddings if provided
         if embed:
             from utils.sp_embedding import Embedding
             vectors = Embedding.load(embed)
@@ -89,27 +91,27 @@ class TriaffineTrainer:
 
         train = Dataset(transform, self.corpus.train)
         WORD.build(train, min_freq, vectors)
-        TAG.build(train)  # NEW
+        TAG.build(train)
         REL.build(train)
         
         n_words = len(WORD.vocab)
-        n_tags = len(TAG.vocab)  # NEW
+        n_tags = len(TAG.vocab)
         n_rels = len(REL.vocab)
         
-        logger.info(f"Vocab sizes - Words: {n_words}, Tags: {n_tags}, Rels: {n_rels}")
+        logger.info(f"[{self.variant_name}] Vocab - Words: {n_words}, Tags: {n_tags}, Rels: {n_rels}")
         
-        # Initialize model with n_tags
-        parser = TriaffineParser(
+        # Initialize model
+        parser = self.parser_cls(
             n_words=n_words,
-            n_embed=300 if embed else 100,  # Use 300 for pretrained, else 100
-            n_tags=n_tags,  # NEW
+            n_embed=300 if embed else 100,
+            n_tags=n_tags,
             n_rels=n_rels,
             pad_index=WORD.pad_index,
             unk_index=WORD.unk_index,
             bert=bert,
             feat_pad_index=FEAT.pad_index,
-            use_sibling=True,
-            transform=transform
+            transform=transform,
+            **parser_kwargs
         ).to(device)
         
         # Optimizer with differential learning rates
@@ -147,27 +149,22 @@ class TriaffineTrainer:
             parser = DDP(parser, device_ids=[dist.get_rank()], find_unused_parameters=True)
         
         # Training loop
-        elapsed = timedelta()
         best_e, best_metric = 1, AttachmentMetric()
         
         for epoch in range(1, max_epochs + 1):
-            start = datetime.now()
-            logger.info(f'Epoch {epoch} / {max_epochs}:')
+            logger.info(f'[{self.variant_name}] Epoch {epoch} / {max_epochs}:')
             
             parser.train()
             bar = progress_bar(train.loader)
-            train_loss = 0
-            n_batches = 0
+            train_loss, n_batches = 0, 0
             
             for batch in bar:
-                # NEW: Unpack tags from batch
                 words, feats, tags, arcs, rels = batch
                 
                 mask = words.ne(parser.pad_index)
                 mask[:, 0] = 0
                 
                 optimizer.zero_grad()
-                # NEW: Pass tags to forward
                 s_arc, s_rel = parser.forward(words, feats, tags)
                 loss = parser.forward_loss(s_arc, s_rel, arcs, rels, mask)
                 loss.backward()
@@ -177,55 +174,36 @@ class TriaffineTrainer:
                 
                 train_loss += loss.item()
                 n_batches += 1
-                
-                bar.set_postfix_str(f"lr: {scheduler.get_last_lr()[0]:.4e} - loss: {loss:.4f}")
+                bar.set_postfix_str(f"loss: {loss:.4f}")
             
-            avg_loss = train_loss / n_batches
-            logger.info(f"Train Loss: {avg_loss:.4f}")
+            logger.info(f"Train Loss: {train_loss / n_batches:.4f}")
             
             # Evaluate
             dev_loss, dev_metric = self._evaluate(parser, dev.loader)
-            logger.info(f"{'dev:':6} - loss: {dev_loss:.4f} - {dev_metric}")
+            logger.info(f"dev: loss={dev_loss:.4f} - {dev_metric}")
             
             test_loss, test_metric = self._evaluate(parser, test.loader)
-            logger.info(f"{'test:':6} - loss: {test_loss:.4f} - {test_metric}")
+            logger.info(f"test: loss={test_loss:.4f} - {test_metric}")
             
-            if wandb:
-                wandb.log({
-                    "epoch": epoch,
-                    "train_loss": avg_loss,
-                    "dev_loss": dev_loss,
-                    "dev_uas": dev_metric.uas,
-                    "dev_las": dev_metric.las,
-                    "test_uas": test_metric.uas,
-                    "test_las": test_metric.las
-                })
-            
-            # Save best model
             if dev_metric > best_metric:
                 best_e, best_metric = epoch, dev_metric
                 if is_master():
                     parser.save(base_path)
-                logger.info(f'Saved best model at epoch {epoch}')
+                logger.info(f'Saved best at epoch {epoch}')
             
-            elapsed += datetime.now() - start
             if epoch - best_e >= patience:
                 break
         
-        logger.info(f"Training Done. Best Dev: {best_metric}")
-        logger.info(f"Final Test: UAS={test_metric.uas:.2%}, LAS={test_metric.las:.2%}")
+        logger.info(f"[{self.variant_name}] Done. Best Dev: {best_metric}")
+        logger.info(f"[{self.variant_name}] Test: UAS={test_metric.uas:.2%}, LAS={test_metric.las:.2%}")
     
     def _evaluate(self, parser, loader):
-        """Evaluate parser on a loader with tags."""
         parser.eval()
-        
-        total_loss = 0
-        metric = AttachmentMetric()
+        total_loss, metric = 0, AttachmentMetric()
         
         with torch.no_grad():
             for batch in loader:
                 words, feats, tags, arcs, rels = batch
-                
                 mask = words.ne(parser.pad_index)
                 mask[:, 0] = 0
                 

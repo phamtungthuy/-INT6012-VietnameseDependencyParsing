@@ -12,7 +12,7 @@ from utils.logs import logger
 from utils.util_deep_learning import device
 from transforms.conll import CoNLL, progress_bar
 from utils.sp_data import Dataset
-from models.solution.dependency_parser import DependencyParser
+from models.biaffine.dependency_parser import DependencyParser
 from utils.sp_metric import Metric, AttachmentMetric
 from utils.sp_field import Field, SubwordField
 from utils.constants import pad, unk, bos

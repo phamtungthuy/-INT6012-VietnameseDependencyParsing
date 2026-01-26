@@ -21,32 +21,6 @@ from utils.sp_alg import eisner, mst
 from utils.constants import PRETRAINED
 from utils.sp_metric import AttachmentMetric
 
-class Triaffine(nn.Module):
-    r"""
-    Triaffine scoring module.
-    Computes s(i, k, j) ~ x_i^T * z_k * y_j
-    (Canonical Polyadic Decomposition / Weighted Dot Product)
-    """
-    def __init__(self, n_in, n_out=1):
-        super(Triaffine, self).__init__()
-        self.n_in = n_in
-        self.n_out = n_out
-
-    def forward(self, x, y, z):
-        r"""
-        Args:
-            x (torch.Tensor): [batch_size, seq_len, n_in] (Head)
-            y (torch.Tensor): [batch_size, seq_len, n_in] (Dependent)
-            z (torch.Tensor): [n_out, n_in] (Relation/Label Embedding)
-
-        Returns:
-            torch.Tensor: [batch_size, seq_len, seq_len, n_out]
-        """
-        # x: bxi, y: byi, z: oi
-        # output: bxyo (batch, seq_x, seq_y, label)
-        return torch.einsum('bxi,byi,oi->bxyo', x, y, z)
-
-
 class DependencyParser(Model):
     r"""
     The implementation of Biaffine Dependency Parser.
@@ -143,46 +117,27 @@ class DependencyParser(Model):
         self.lstm_dropout = SharedDropout(p=lstm_dropout)
 
         # the MLP layers
-        # Arc MLPs (Biaffine)
         self.mlp_arc_d = MLP(n_in=n_lstm_hidden * 2,
                              n_out=n_mlp_arc,
                              dropout=mlp_dropout)
         self.mlp_arc_h = MLP(n_in=n_lstm_hidden * 2,
                              n_out=n_mlp_arc,
                              dropout=mlp_dropout)
-        
-        # Relation MLPs (Triaffine + 4 MLPs as requested)
-        # Using n_in = n_lstm_hidden * 2 for token-based MLPs
         self.mlp_rel_d = MLP(n_in=n_lstm_hidden * 2,
                              n_out=n_mlp_rel,
                              dropout=mlp_dropout)
         self.mlp_rel_h = MLP(n_in=n_lstm_hidden * 2,
                              n_out=n_mlp_rel,
                              dropout=mlp_dropout)
-        self.mlp_rel_s = MLP(n_in=n_lstm_hidden * 2,
-                             n_out=n_mlp_rel,
-                             dropout=mlp_dropout)
-        
-        # For 'r', input is relation embedding.
-        # We define a parameter for relation embeddings.
-        # Use n_lstm_hidden * 2 as base dim to match others if no separate config? 
-        # But MLP n_in expects fixed size.
-        # Let's use n_mlp_rel as embedding dim for Relations to save params, 
-        # or n_lstm_hidden*2. Let's use n_lstm_hidden*2 for consistency with other MLPs inputs.
-        self.rel_feat_embed = nn.Parameter(torch.randn(n_rels, n_lstm_hidden * 2))
-        
-        self.mlp_rel_r = MLP(n_in=n_lstm_hidden * 2,
-                             n_out=n_mlp_rel,
-                             dropout=mlp_dropout)
 
-        # the Biaffine layers (for Arc)
+        # the Biaffine layers
         self.arc_attn = Biaffine(n_in=n_mlp_arc,
                                  bias_x=True,
                                  bias_y=False)
-        
-        # Triaffine scorer (for Relation)
-        self.triaffine = Triaffine(n_in=n_mlp_rel, n_out=n_rels)
-
+        self.rel_attn = Biaffine(n_in=n_mlp_rel,
+                                 n_out=n_rels,
+                                 bias_x=True,
+                                 bias_y=True)
         self.criterion = nn.CrossEntropyLoss()
         self.pad_index = pad_index
         self.unk_index = unk_index
@@ -342,7 +297,7 @@ class DependencyParser(Model):
         Examples:
             >>> # from underthesea.models.dependency_parser import DependencyParser
             >>> # parser = DependencyParser.load('vi-dp-v1')
-            >>> # parser = DependencyParser.load('./tmp/resources/parsers/dp')
+            >>> # parser = DependencyParser.load('./traditional/resources/parsers/dp')
         """
         if os.path.exists(path):
             state = torch.load(path, weights_only=False)
@@ -418,26 +373,16 @@ class DependencyParser(Model):
         x, _ = pad_packed_sequence(x, True, total_length=seq_len)
         x = self.lstm_dropout(x)
 
-        # Apply MLPs
-        # Arc
+        # apply MLPs to the BiLSTM output states
         arc_d = self.mlp_arc_d(x)
         arc_h = self.mlp_arc_h(x)
-        
-        # Relation (4 MLPs)
         rel_d = self.mlp_rel_d(x)
         rel_h = self.mlp_rel_h(x)
-        rel_s = self.mlp_rel_s(x) # Computed but unused in standard triaffine
-        
-        # Rel Embed MLP
-        rel_r = self.mlp_rel_r(self.rel_feat_embed)
 
         # [batch_size, seq_len, seq_len]
         s_arc = self.arc_attn(arc_d, arc_h)
-        
-        # Relation Triaffine:
-        # Inputs: rel_h (B, N, D), rel_d (B, N, D), rel_r (K, D)
-        s_rel = self.triaffine(rel_h, rel_d, rel_r)
-
+        # [batch_size, seq_len, seq_len, n_rels]
+        s_rel = self.rel_attn(rel_d, rel_h).permute(0, 2, 3, 1)
         # set the scores that exceed the length of each sentence to -inf
         s_arc.masked_fill_(~mask.unsqueeze(1), float('-inf'))
 

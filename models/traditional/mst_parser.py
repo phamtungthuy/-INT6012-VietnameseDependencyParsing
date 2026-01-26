@@ -13,7 +13,7 @@ from typing import List, Dict, Any, Tuple, Set
 from collections import defaultdict
 import numpy as np
 
-from models.tmp.base_traditional_parser import BaseTraditionalParser
+from models.traditional.base_traditional_parser import BaseTraditionalParser
 
 
 class MSTParser(BaseTraditionalParser):

@@ -1,5 +1,5 @@
 """
-TmpTrainer - Trainer for models/tmp parsers.
+TraditionalTrainer - Trainer for models/traditional parsers.
 
 These are the fast, simple traditional parsers.
 """
@@ -13,14 +13,14 @@ from tqdm import tqdm
 
 from utils.logs import logger
 
-from models.tmp.malt_parser import MaltParser
-from models.tmp.mst_parser import MSTParser  
-from models.tmp.turbo_parser import TurboParser
+from models.traditional.malt_parser_old import MaltParser
+from models.traditional.mst_parser import MSTParser  
+from models.traditional.turbo_parser import TurboParser
 
 
-class TmpTrainer:
+class TraditionalTrainer:
     """
-    Trainer for models/tmp parsers.
+    Trainer for models/traditional parsers.
     """
     
     PARSER_CLASSES = {

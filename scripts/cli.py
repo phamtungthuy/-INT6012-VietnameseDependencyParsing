@@ -90,7 +90,7 @@ def train_biaffine(feat: str, bert: str, embed: str, epochs: int, batch_size: in
     from datasets import ViVTBCorpus
     from trainers.dependency_parser_trainer import DependencyParserTrainer
     
-    from models.solution.dependency_parser import DependencyParser
+    from models.biaffine.dependency_parser import DependencyParser
     from modules.embeddings import CharacterEmbeddings, FieldEmbeddings
     embeddings = [
         FieldEmbeddings()
@@ -141,55 +141,59 @@ def cli():
 
 # === Tmp trainer commands ===
 
-@click.command('train-tmp-malt')
+@click.command('train-malt-parser')
 @click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
-def train_tmp_malt(epochs: int):
-    """Train MaltParser from models/tmp (fast version)."""
+@click.option('--save-path', '-s', default='checkpoints/malt_parser', help='Path to save model')
+def train_malt_parser(epochs: int, save_path: str):
+    """Train MaltParser from models/traditional (Arc-Standard)."""
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from datasets import ViVTBCorpus
-    from trainers.tmp_trainer import TmpTrainer
+    from trainers.malt_trainer import MaltTrainer
+    from models.traditional.malt_parser import MaltParser
+    
+    malt_parser = MaltParser()
+    corpus = ViVTBCorpus()
+    click.echo(f"📊 MaltParser (Arc-Standard) - Epochs: {epochs}")
+    # MaltTrainer creates its own parser inside train(), so we pass None
+    trainer = MaltTrainer(parser=malt_parser, corpus=corpus) 
+    trainer.train(base_path=save_path, max_epochs=epochs)
+
+
+@click.command('train-mst-parser')
+@click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
+def train_mst_parser(epochs: int):
+    """Train MSTParser from models/traditional (fast version)."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.traditional_trainer import TraditionalTrainer
     
     corpus = ViVTBCorpus()
-    click.echo(f"📊 TMP MaltParser - Epochs: {epochs}")
-    trainer = TmpTrainer(parser_type='malt', corpus=corpus)
+    click.echo(f"📊 MSTParser - Epochs: {epochs}")
+    trainer = TraditionalTrainer(parser_type='mst', corpus=corpus)
     trainer.train(max_epochs=epochs)
 
 
-@click.command('train-tmp-mst')
+@click.command('train-turbo-parser')
 @click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
-def train_tmp_mst(epochs: int):
-    """Train MSTParser from models/tmp (fast version)."""
+def train_turbo_parser(epochs: int):
+    """Train TurboParser from models/traditional (fast version)."""
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent))
     from datasets import ViVTBCorpus
-    from trainers.tmp_trainer import TmpTrainer
+    from trainers.traditional_trainer import TraditionalTrainer
     
     corpus = ViVTBCorpus()
-    click.echo(f"📊 TMP MSTParser - Epochs: {epochs}")
-    trainer = TmpTrainer(parser_type='mst', corpus=corpus)
-    trainer.train(max_epochs=epochs)
-
-
-@click.command('train-tmp-turbo')
-@click.option('--epochs', default=20, type=int, help='Maximum number of epochs')
-def train_tmp_turbo(epochs: int):
-    """Train TurboParser from models/tmp (fast version)."""
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from datasets import ViVTBCorpus
-    from trainers.tmp_trainer import TmpTrainer
-    
-    corpus = ViVTBCorpus()
-    click.echo(f"📊 TMP TurboParser - Epochs: {epochs}")
-    trainer = TmpTrainer(parser_type='turbo', corpus=corpus)
+    click.echo(f"📊 TurboParser - Epochs: {epochs}")
+    trainer = TraditionalTrainer(parser_type='turbo', corpus=corpus)
     trainer.train(max_epochs=epochs)
 
 
 cli.add_command(train_biaffine)
-cli.add_command(train_tmp_malt)
-cli.add_command(train_tmp_mst)
-cli.add_command(train_tmp_turbo)
+cli.add_command(train_malt_parser)
+cli.add_command(train_mst_parser)
+cli.add_command(train_turbo_parser)
 cli.add_command(visualize)
 cli.add_command(demo)
 cli.add_command(analyze)

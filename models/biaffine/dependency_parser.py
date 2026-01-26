@@ -21,6 +21,149 @@ from utils.sp_alg import eisner, mst
 from utils.constants import PRETRAINED
 from utils.sp_metric import AttachmentMetric
 
+class Triaffine(nn.Module):
+    r"""
+    Context-Aware Triaffine scoring module.
+    
+    Computes trilinear scores s(head, dep, context) where context is derived from:
+    - Left context: tokens to the left (like stack in transition-based parsing)
+    - Right context: tokens to the right (like buffer in transition-based parsing)
+    
+    This captures second-order interactions beyond simple head-dependent pairs,
+    similar to features used in transition-based parsers (left/right children, 
+    stack top, buffer front, etc.)
+    
+    The scoring function:
+        s(i, j, r) = h_i^T W_r d_j + h_i^T U_r c_ij + d_j^T V_r c_ij
+    
+    Where c_ij is the aggregated context for the (i, j) arc.
+    """
+    def __init__(self, n_in, n_out=1, use_context=True):
+        super(Triaffine, self).__init__()
+        self.n_in = n_in
+        self.n_out = n_out
+        self.use_context = use_context
+        
+        # Trilinear weight for head-dep-label interaction
+        # W_r: score between head and dependent for each relation
+        self.W = nn.Parameter(torch.randn(n_out, n_in, n_in))
+        
+        if use_context:
+            # U_r: weight for head-context interaction
+            self.U = nn.Parameter(torch.randn(n_out, n_in, n_in))
+            # V_r: weight for dep-context interaction  
+            self.V = nn.Parameter(torch.randn(n_out, n_in, n_in))
+            # Context aggregation weights (for combining left and right context)
+            self.context_gate = nn.Linear(n_in * 2, n_in)
+        
+        self.reset_parameters()
+    
+    def reset_parameters(self):
+        nn.init.xavier_uniform_(self.W)
+        if self.use_context:
+            nn.init.xavier_uniform_(self.U)
+            nn.init.xavier_uniform_(self.V)
+            nn.init.xavier_uniform_(self.context_gate.weight)
+            nn.init.zeros_(self.context_gate.bias)
+    
+    def _compute_context(self, x, mask=None):
+        """
+        Compute left and right context for each position.
+        
+        Left context (stack-like): average of tokens to the left of current position
+        Right context (buffer-like): average of tokens to the right of current position
+        
+        Args:
+            x: [batch_size, seq_len, n_in] - token representations
+            mask: [batch_size, seq_len] - valid token mask
+            
+        Returns:
+            left_ctx: [batch_size, seq_len, n_in] - left context for each position
+            right_ctx: [batch_size, seq_len, n_in] - right context for each position
+        """
+        batch_size, seq_len, n_in = x.shape
+        device = x.device
+        
+        # Create position mask: left_mask[i,j] = 1 if j < i (j is to the left of i)
+        positions = torch.arange(seq_len, device=device)
+        left_mask = positions.unsqueeze(0) < positions.unsqueeze(1)  # [seq_len, seq_len]
+        right_mask = positions.unsqueeze(0) > positions.unsqueeze(1)  # [seq_len, seq_len]
+        
+        # Apply input mask if provided
+        if mask is not None:
+            # mask: [batch, seq_len] -> [batch, 1, seq_len]
+            valid_mask = mask.unsqueeze(1).float()
+            left_mask = left_mask.unsqueeze(0).float() * valid_mask  # [batch, seq_len, seq_len]
+            right_mask = right_mask.unsqueeze(0).float() * valid_mask
+        else:
+            left_mask = left_mask.unsqueeze(0).expand(batch_size, -1, -1).float()
+            right_mask = right_mask.unsqueeze(0).expand(batch_size, -1, -1).float()
+        
+        # Compute counts for averaging (avoid division by zero)
+        left_counts = left_mask.sum(dim=-1, keepdim=True).clamp(min=1)  # [batch, seq_len, 1]
+        right_counts = right_mask.sum(dim=-1, keepdim=True).clamp(min=1)
+        
+        # Aggregate context: weighted sum of tokens
+        # left_ctx[i] = mean(x[j] for j < i)
+        left_ctx = torch.bmm(left_mask, x) / left_counts  # [batch, seq_len, n_in]
+        right_ctx = torch.bmm(right_mask, x) / right_counts
+        
+        return left_ctx, right_ctx
+    
+    def forward(self, head, dep, ctx=None, mask=None):
+        r"""
+        Args:
+            head (torch.Tensor): [batch_size, seq_len, n_in] - Head representations
+            dep (torch.Tensor): [batch_size, seq_len, n_in] - Dependent representations
+            ctx (torch.Tensor): [batch_size, seq_len, n_in] - Optional explicit context
+                                If None, context is computed from left/right neighbors
+            mask (torch.Tensor): [batch_size, seq_len] - Valid token mask
+
+        Returns:
+            torch.Tensor: [batch_size, seq_len, seq_len, n_out]
+                         Scores for each (head_i, dep_j, relation_r) triple
+        """
+        batch_size, seq_len, _ = head.shape
+        
+        # Basic biaffine-style head-dep scoring: h_i^T W_r d_j
+        # [batch, n_out, seq, seq]
+        s_hd = torch.einsum('bhi,rij,bdj->brhd', head, self.W, dep)
+        
+        if self.use_context:
+            # Compute context if not provided
+            if ctx is None:
+                left_ctx, right_ctx = self._compute_context(dep, mask)
+                # Combine left and right context with gating
+                combined_ctx = torch.cat([left_ctx, right_ctx], dim=-1)
+                ctx = torch.sigmoid(self.context_gate(combined_ctx))  # [batch, seq_len, n_in]
+            
+            # Expand context for pairwise scoring
+            # For arc (i -> j), we want context relevant to position j
+            # ctx: [batch, seq_len, n_in] -> [batch, 1, seq_len, n_in]
+            ctx_expanded = ctx.unsqueeze(1)  # context for each dependent position
+            
+            # Head-context interaction: h_i^T U_r c_j
+            # [batch, n_out, seq_head, seq_dep]
+            s_hc = torch.einsum('bhi,rij,bkdj->brhd', head, self.U, ctx_expanded)
+            
+            # Dep-context interaction: d_j^T V_r c_j  
+            # This adds self-context modulation for the dependent
+            # [batch, n_out, seq_dep]
+            s_dc = torch.einsum('bdj,rij,bdj->brd', dep, self.V, ctx)
+            # Broadcast to [batch, n_out, seq_head, seq_dep]
+            s_dc = s_dc.unsqueeze(2).expand(-1, -1, seq_len, -1)
+            
+            # Combine all scoring terms
+            s = s_hd + s_hc + s_dc
+        else:
+            s = s_hd
+        
+        # Permute to [batch, seq_head, seq_dep, n_out]
+        s = s.permute(0, 2, 3, 1)
+        
+        return s
+
+
 class DependencyParser(Model):
     r"""
     The implementation of Biaffine Dependency Parser.
@@ -117,27 +260,37 @@ class DependencyParser(Model):
         self.lstm_dropout = SharedDropout(p=lstm_dropout)
 
         # the MLP layers
+        # Arc MLPs (Biaffine)
         self.mlp_arc_d = MLP(n_in=n_lstm_hidden * 2,
                              n_out=n_mlp_arc,
                              dropout=mlp_dropout)
         self.mlp_arc_h = MLP(n_in=n_lstm_hidden * 2,
                              n_out=n_mlp_arc,
                              dropout=mlp_dropout)
+        
+        # Relation MLPs for Context-Aware Triaffine
+        # - rel_h: head representation for relation scoring
+        # - rel_d: dependent representation for relation scoring  
+        # - rel_s: context/sibling representation (for left/right context aggregation)
         self.mlp_rel_d = MLP(n_in=n_lstm_hidden * 2,
                              n_out=n_mlp_rel,
                              dropout=mlp_dropout)
         self.mlp_rel_h = MLP(n_in=n_lstm_hidden * 2,
                              n_out=n_mlp_rel,
                              dropout=mlp_dropout)
+        self.mlp_rel_s = MLP(n_in=n_lstm_hidden * 2,
+                             n_out=n_mlp_rel,
+                             dropout=mlp_dropout)
 
-        # the Biaffine layers
+        # the Biaffine layers (for Arc)
         self.arc_attn = Biaffine(n_in=n_mlp_arc,
                                  bias_x=True,
                                  bias_y=False)
-        self.rel_attn = Biaffine(n_in=n_mlp_rel,
-                                 n_out=n_rels,
-                                 bias_x=True,
-                                 bias_y=True)
+        
+        # Context-Aware Triaffine scorer (for Relation)
+        # Uses left/right context (stack/buffer-like features)
+        self.triaffine = Triaffine(n_in=n_mlp_rel, n_out=n_rels, use_context=True)
+
         self.criterion = nn.CrossEntropyLoss()
         self.pad_index = pad_index
         self.unk_index = unk_index
@@ -373,16 +526,29 @@ class DependencyParser(Model):
         x, _ = pad_packed_sequence(x, True, total_length=seq_len)
         x = self.lstm_dropout(x)
 
-        # apply MLPs to the BiLSTM output states
+        # Apply MLPs
+        # Arc scoring MLPs
         arc_d = self.mlp_arc_d(x)
         arc_h = self.mlp_arc_h(x)
+        
+        # Relation scoring MLPs (Context-Aware Triaffine)
+        # rel_h: head representation
+        # rel_d: dependent representation
+        # rel_s: context representation (used for left/right context aggregation)
         rel_d = self.mlp_rel_d(x)
         rel_h = self.mlp_rel_h(x)
+        rel_s = self.mlp_rel_s(x)  # Context representation for stack/buffer features
 
         # [batch_size, seq_len, seq_len]
         s_arc = self.arc_attn(arc_d, arc_h)
-        # [batch_size, seq_len, seq_len, n_rels]
-        s_rel = self.rel_attn(rel_d, rel_h).permute(0, 2, 3, 1)
+        
+        # Context-Aware Triaffine Relation Scoring:
+        # - Scores s(head_i, dep_j, rel_r) with context from left/right neighbors
+        # - Context is computed from rel_s representations
+        # - Left context ~ stack (already processed tokens)
+        # - Right context ~ buffer (tokens to be processed)
+        s_rel = self.triaffine(rel_h, rel_d, ctx=rel_s, mask=mask)
+
         # set the scores that exceed the length of each sentence to -inf
         s_arc.masked_fill_(~mask.unsqueeze(1), float('-inf'))
 

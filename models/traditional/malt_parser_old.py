@@ -12,7 +12,7 @@ Features:
 from typing import List, Dict, Tuple, Any
 from collections import defaultdict
 
-from models.tmp.base_traditional_parser import BaseTraditionalParser
+from models.traditional.base_traditional_parser import BaseTraditionalParser
 
 
 def _nested_float_dict():

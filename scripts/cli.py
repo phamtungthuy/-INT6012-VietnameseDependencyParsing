@@ -405,9 +405,11 @@ cli.add_command(train_neural_parser)
 @click.command('train-ablation-multihead')
 @click.option('--epochs', default=20, type=int)
 @click.option('--batch-size', default=3000, type=int)
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
 @click.option('--embed', default=None, help='Path to pretrained embeddings')
 @click.option('--save-path', '-s', default='checkpoints/ablation_multihead.pt')
-def train_ablation_multihead(epochs, batch_size, embed, save_path):
+def train_ablation_multihead(epochs, batch_size, lr, bert_lr, embed, save_path):
     """Ablation: Multi-Head Biaffine (4 heads)"""
     import sys
     from pathlib import Path
@@ -419,16 +421,18 @@ def train_ablation_multihead(epochs, batch_size, embed, save_path):
     click.echo("🔬 Ablation Study: Multi-Head Biaffine")
     corpus = ViVTBCorpus()
     trainer = AblationTrainer(TriaffineMultiHead, corpus, 'MultiHead')
-    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size)
+    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size, lr=lr, bert_lr=bert_lr)
     click.echo(f"✅ Done! Model saved to: {save_path}")
 
 
 @click.command('train-ablation-scalarmix')
 @click.option('--epochs', default=20, type=int)
 @click.option('--batch-size', default=3000, type=int)
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
 @click.option('--embed', default=None, help='Path to pretrained embeddings')
 @click.option('--save-path', '-s', default='checkpoints/ablation_scalarmix.pt')
-def train_ablation_scalarmix(epochs, batch_size, embed, save_path):
+def train_ablation_scalarmix(epochs, batch_size, lr, bert_lr, embed, save_path):
     """Ablation: Scalar Mix (all 12 BERT layers)"""
     import sys
     from pathlib import Path
@@ -440,16 +444,18 @@ def train_ablation_scalarmix(epochs, batch_size, embed, save_path):
     click.echo("🔬 Ablation Study: Scalar Mix (12 BERT layers)")
     corpus = ViVTBCorpus()
     trainer = AblationTrainer(TriaffineScalarMix, corpus, 'ScalarMix')
-    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size)
+    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size, lr=lr, bert_lr=bert_lr)
     click.echo(f"✅ Done! Model saved to: {save_path}")
 
 
 @click.command('train-ablation-charlstm')
 @click.option('--epochs', default=20, type=int)
 @click.option('--batch-size', default=3000, type=int)
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
 @click.option('--embed', default=None, help='Path to pretrained embeddings')
 @click.option('--save-path', '-s', default='checkpoints/ablation_charlstm.pt')
-def train_ablation_charlstm(epochs, batch_size, embed, save_path):
+def train_ablation_charlstm(epochs, batch_size, lr, bert_lr, embed, save_path):
     """Ablation: Character-level LSTM"""
     import sys
     from pathlib import Path
@@ -461,16 +467,18 @@ def train_ablation_charlstm(epochs, batch_size, embed, save_path):
     click.echo("🔬 Ablation Study: Character LSTM")
     corpus = ViVTBCorpus()
     trainer = AblationTrainer(TriaffineCharLSTM, corpus, 'CharLSTM')
-    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size)
+    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size, lr=lr, bert_lr=bert_lr)
     click.echo(f"✅ Done! Model saved to: {save_path}")
 
 
 @click.command('train-ablation-combined')
 @click.option('--epochs', default=20, type=int)
 @click.option('--batch-size', default=3000, type=int)
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
 @click.option('--embed', default=None, help='Path to pretrained embeddings')
 @click.option('--save-path', '-s', default='checkpoints/ablation_combined.pt')
-def train_ablation_combined(epochs, batch_size, embed, save_path):
+def train_ablation_combined(epochs, batch_size, lr, bert_lr, embed, save_path):
     """Ablation: Multi-Head + Scalar Mix combined"""
     import sys
     from pathlib import Path
@@ -482,7 +490,7 @@ def train_ablation_combined(epochs, batch_size, embed, save_path):
     click.echo("🔬 Ablation Study: Multi-Head + Scalar Mix")
     corpus = ViVTBCorpus()
     trainer = AblationTrainer(TriaffineMultiHeadScalarMix, corpus, 'MultiHead+ScalarMix')
-    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size)
+    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size, lr=lr, bert_lr=bert_lr)
     click.echo(f"✅ Done! Model saved to: {save_path}")
 
 

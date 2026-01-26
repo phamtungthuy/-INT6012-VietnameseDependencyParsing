@@ -494,10 +494,111 @@ def train_ablation_combined(epochs, batch_size, lr, bert_lr, embed, save_path):
     click.echo(f"✅ Done! Model saved to: {save_path}")
 
 
+@click.command('train-ablation-noword')
+@click.option('--epochs', default=20, type=int)
+@click.option('--batch-size', default=3000, type=int)
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
+@click.option('--save-path', '-s', default='checkpoints/ablation_noword.pt')
+def train_ablation_noword(epochs, batch_size, lr, bert_lr, save_path):
+    """Ablation: No Word Embedding (BERT + Tag only)"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.ablation_trainer import AblationTrainer
+    from models.graph_based.ablation.triaffine_noword import TriaffineNoWord
+    
+    click.echo("🔬 Ablation Study: No Word Embedding (BERT + Tag only)")
+    corpus = ViVTBCorpus()
+    trainer = AblationTrainer(TriaffineNoWord, corpus, 'NoWord')
+    trainer.train(base_path=save_path, max_epochs=epochs, batch_size=batch_size, lr=lr, bert_lr=bert_lr)
+    click.echo(f"✅ Done! Model saved to: {save_path}")
+
+
+@click.command('train-ablation-jointtagger')
+@click.option('--epochs', default=20, type=int)
+@click.option('--batch-size', default=3000, type=int)
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
+@click.option('--embed', default=None, help='Path to pretrained embeddings')
+@click.option('--save-path', '-s', default='checkpoints/ablation_jointtagger.pt')
+def train_ablation_jointtagger(epochs, batch_size, lr, bert_lr, embed, save_path):
+    """Ablation: Joint POS Tagger (like V3)"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.jointtagger_trainer import JointTaggerTrainer
+    
+    click.echo("🔬 Ablation Study: Joint POS Tagger")
+    corpus = ViVTBCorpus()
+    trainer = JointTaggerTrainer(corpus)
+    trainer.train(base_path=save_path, embed=embed, max_epochs=epochs, batch_size=batch_size, lr=lr, bert_lr=bert_lr)
+    click.echo(f"✅ Done! Model saved to: {save_path}")
+
+
 cli.add_command(train_ablation_multihead)
 cli.add_command(train_ablation_scalarmix)
 cli.add_command(train_ablation_charlstm)
 cli.add_command(train_ablation_combined)
+cli.add_command(train_ablation_noword)
+cli.add_command(train_ablation_jointtagger)
+
+
+@click.command('test-jointtagger')
+@click.option('--model-path', '-m', required=True, help='Path to saved joint tagger model')
+def test_jointtagger(model_path):
+    """Test a saved Joint Tagger model on test set (no gold POS tags)"""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    
+    import torch
+    from datasets import ViVTBCorpus
+    from models.graph_based.ablation.triaffine_jointtagger import TriaffineJointTagger
+    from utils.sp_data import Dataset
+    from utils.sp_metric import AttachmentMetric
+    
+    click.echo(f"📊 Loading model from: {model_path}")
+    parser = TriaffineJointTagger.load(model_path)
+    
+    click.echo("📊 Loading test data...")
+    corpus = ViVTBCorpus()
+    test = Dataset(parser.transform, corpus.test)
+    test.build(3000, 32)
+    
+    click.echo("🔬 Evaluating (without gold POS tags)...")
+    parser.eval()
+    
+    tag_correct, tag_total = 0, 0
+    metric = AttachmentMetric()
+    
+    with torch.no_grad():
+        for batch in test.loader:
+            words, feats, tags, arcs, rels = batch
+            mask = words.ne(parser.pad_index)
+            mask[:, 0] = 0
+            
+            # Forward WITHOUT gold tags
+            s_tag, s_arc, s_rel = parser.forward(words, feats, use_gold_tags=False)
+            
+            # Tag accuracy
+            tag_preds = s_tag.argmax(-1)
+            tag_correct += (tag_preds[mask] == tags[mask]).sum().item()
+            tag_total += mask.sum().item()
+            
+            # Arc/Rel
+            arc_preds, rel_preds = parser.decode(s_arc, s_rel, mask)
+            metric(arc_preds, rel_preds, arcs, rels, mask)
+    
+    tag_acc = tag_correct / tag_total if tag_total > 0 else 0
+    click.echo(f"\n📊 Test Results (NO gold POS tags):")
+    click.echo(f"   POS Tag Accuracy: {tag_acc:.2%}")
+    click.echo(f"   {metric}")
+
+
+cli.add_command(test_jointtagger)
 
 
 def main():

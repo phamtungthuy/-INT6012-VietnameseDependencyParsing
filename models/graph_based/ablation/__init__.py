@@ -10,10 +10,14 @@ from models.graph_based.ablation.triaffine_multihead import TriaffineMultiHead
 from models.graph_based.ablation.triaffine_scalarmix import TriaffineScalarMix
 from models.graph_based.ablation.triaffine_charlstm import TriaffineCharLSTM
 from models.graph_based.ablation.triaffine_multihead_scalarmix import TriaffineMultiHeadScalarMix
+from models.graph_based.ablation.triaffine_noword import TriaffineNoWord
+from models.graph_based.ablation.triaffine_jointtagger import TriaffineJointTagger
 
 __all__ = [
     'TriaffineMultiHead',
     'TriaffineScalarMix', 
     'TriaffineCharLSTM',
-    'TriaffineMultiHeadScalarMix'
+    'TriaffineMultiHeadScalarMix',
+    'TriaffineNoWord',
+    'TriaffineJointTagger'
 ]

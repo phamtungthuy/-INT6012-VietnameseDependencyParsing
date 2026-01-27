@@ -46,7 +46,8 @@ class NeuralTransitionParser(nn.Module):
         tag_embed_dim: int = 50,
         rel_embed_dim: int = 50,
         hidden_dim: int = 200,
-        dropout: float = 0.5,
+        dropout: float = 0.33,  # Reduced from 0.5
+        use_cube_activation: bool = False,  # NEW: Option to use cube or ReLU
         pretrained_embed: Optional[torch.Tensor] = None
     ):
         super(NeuralTransitionParser, self).__init__()
@@ -55,6 +56,7 @@ class NeuralTransitionParser(nn.Module):
         self.n_tags = n_tags
         self.n_rels = n_rels
         self.n_actions = n_actions
+        self.use_cube_activation = use_cube_activation
         
         # Feature dimensions (as in Chen & Manning)
         # Words: s1, s2, s3, b1, b2, b3, lc1(s1), rc1(s1), lc1(s2), rc1(s2), 
@@ -109,8 +111,19 @@ class NeuralTransitionParser(nn.Module):
         nn.init.zeros_(self.output.bias)
     
     def cube_activation(self, x: torch.Tensor) -> torch.Tensor:
-        """Cube activation function: f(x) = x^3"""
+        """Cube activation function: f(x) = x^3
+        Note: Can cause gradient explosion/vanishing. Use with caution.
+        """
+        # Clamp to prevent extreme values
+        x = torch.clamp(x, -3.0, 3.0)
         return x ** 3
+    
+    def activation(self, x: torch.Tensor) -> torch.Tensor:
+        """Activation function - uses cube or ReLU based on config"""
+        if self.use_cube_activation:
+            return self.cube_activation(x)
+        else:
+            return F.relu(x)
     
     def forward(
         self,
@@ -142,11 +155,13 @@ class NeuralTransitionParser(nn.Module):
         # Concatenate all features
         x = torch.cat([word_embeds, tag_embeds, rel_embeds], dim=-1)
         
-        # Hidden layer with cube activation
+        # Apply dropout ONLY on input embeddings (as per Chen & Manning)
         x = self.dropout(x)
+        
+        # Hidden layer with activation
         h = self.hidden(x)
-        h = self.cube_activation(h)
-        h = self.dropout(h)
+        h = self.activation(h)  # Use configurable activation
+        # NO dropout after activation (Chen & Manning paper)
         
         # Output layer
         action_scores = self.output(h)
@@ -248,12 +263,16 @@ class NeuralTransitionParser(nn.Module):
         lc1_lc1_s1 = get_left_child(lc1_s1, arcs, 1) if lc1_s1 is not None else None
         lc1_rc1_s1 = get_left_child(rc1_s1, arcs, 1) if rc1_s1 is not None else None
         
-        # Word features (18 positions)
+        # Add more grandchildren features for better coverage
+        rc1_lc1_s1 = get_right_child(lc1_s1, arcs, 1) if lc1_s1 is not None else None
+        rc1_rc1_s1 = get_right_child(rc1_s1, arcs, 1) if rc1_s1 is not None else None
+        
+        # Word features (18 positions) - NO unnecessary None padding
         word_positions = [s1, s2, s3, b1, b2, b3,
                          lc1_s1, rc1_s1, lc1_s2, rc1_s2,
                          lc2_s1, rc2_s1, lc1_b1, rc1_b1,
                          lc1_lc1_s1, lc1_rc1_s1,
-                         None, None]  # Padding to 18
+                         rc1_lc1_s1, rc1_rc1_s1]  # Actual grandchildren instead of None padding
         
         word_feats = [get_word(p) for p in word_positions]
         tag_feats = [get_tag(p) for p in word_positions]
@@ -262,7 +281,7 @@ class NeuralTransitionParser(nn.Module):
         rel_positions = [lc1_s1, rc1_s1, lc1_s2, rc1_s2,
                         lc2_s1, rc2_s1, lc1_b1, rc1_b1,
                         lc1_lc1_s1, lc1_rc1_s1,
-                        None, None]  # Padding to 12
+                        rc1_lc1_s1, rc1_rc1_s1]  # Actual grandchildren instead of None padding
         
         rel_feats = [get_rel(p) for p in rel_positions]
         
@@ -363,18 +382,31 @@ class NeuralTransitionParser(nn.Module):
             best_score = float('-inf')
             
             for action_idx in range(self.n_actions):
-                if self.action_vocab:
+                if self.action_vocab and hasattr(self.action_vocab, 'itos'):
                     action = self.action_vocab.itos[action_idx]
                 else:
-                    action = str(action_idx)
+                    # FIXED: Better fallback - map index to action type
+                    # This ensures valid action names even without vocab
+                    if action_idx == 0:
+                        action = 'SHIFT'
+                    elif action_idx % 2 == 1:
+                        action = 'LEFT-ARC#dep'
+                    else:
+                        action = 'RIGHT-ARC#dep'
                 
                 base_action = action.split('#')[0]
-                if base_action in valid_actions and scores[action_idx] > best_score:
-                    best_score = scores[action_idx]
+                if base_action in valid_actions and scores[action_idx].item() > best_score:
+                    best_score = scores[action_idx].item()
                     best_action = action
             
             if best_action is None:
-                best_action = valid_actions[0]
+                # FIXED: Fallback with proper action format
+                if 'SHIFT' in valid_actions:
+                    best_action = 'SHIFT'
+                elif 'LEFT-ARC' in valid_actions:
+                    best_action = 'LEFT-ARC#dep'
+                else:
+                    best_action = 'RIGHT-ARC#dep'
             
             self.apply_action(best_action, stack, buffer, arcs, rels)
         

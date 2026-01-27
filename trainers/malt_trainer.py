@@ -161,4 +161,13 @@ class MaltTrainer:
             # Calculate Metric
             metric_test(pred_arcs, pred_rels, arcs, rels, mask)
             
-        logger.info(f"Test Results: {metric_test}") 
+        logger.info(f"Test Results: {metric_test}")
+        
+        # Save model using pickle
+        import pickle
+        import os
+        os.makedirs(os.path.dirname(str(base_path)) or '.', exist_ok=True)
+        save_path = str(base_path) if str(base_path).endswith('.pkl') else f"{base_path}.pkl"
+        with open(save_path, 'wb') as f:
+            pickle.dump(parser, f)
+        logger.info(f"Model saved to: {save_path}") 

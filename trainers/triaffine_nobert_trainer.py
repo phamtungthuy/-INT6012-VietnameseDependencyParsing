@@ -20,7 +20,7 @@ from utils.logs import logger
 from utils.util_deep_learning import device
 from transforms.conll import CoNLL, progress_bar
 from utils.sp_data import Dataset
-from utils.sp_field import Field, CharField
+from utils.sp_field import Field, SubwordField
 from utils.constants import pad, unk, bos
 from utils.sp_metric import AttachmentMetric
 from utils.sp_parallel import DistributedDataParallel as DDP, is_master
@@ -59,7 +59,7 @@ class TriaffineNoBertTrainer:
         
         # Fields: Word, Char, Tag, Arc, Rel
         WORD = Field('words', pad=pad, unk=unk, bos=bos, lower=True)
-        CHAR = CharField('chars', pad=pad, unk=unk, bos=bos, fix_len=fix_len)
+        CHAR = SubwordField('chars', pad=pad, unk=unk, bos=bos, fix_len=fix_len)
         TAG = Field('tags', bos=bos)
         ARC = Field('arcs', bos=bos, use_vocab=False, fn=CoNLL.get_arcs)
         REL = Field('rels', bos=bos)

@@ -722,7 +722,7 @@ cli.add_command(test_jointtagger)
 
 @click.command('evaluate-and-save')
 @click.option('--model-type', '-t', required=True, 
-              type=click.Choice(['malt', 'biaffine', 'triaffine'], case_sensitive=False),
+              type=click.Choice(['malt', 'neural', 'biaffine', 'triaffine'], case_sensitive=False),
               help='Type of model to evaluate')
 @click.option('--model-path', '-m', required=True, help='Path to saved model checkpoint')
 @click.option('--output-path', '-o', default=None, help='Path to save results JSON (default: results/<model-type>_results.json)')
@@ -731,14 +731,17 @@ def evaluate_and_save(model_type, model_path, output_path, batch_size):
     """Evaluate a trained model on test set and save results for visualization.
     
     This command:
-    1. Loads a trained model (malt, biaffine, or triaffine)
+    1. Loads a trained model (malt, neural, biaffine, or triaffine)
     2. Runs evaluation on the test set
     3. Saves predictions, gold labels, and metrics to JSON for analysis
     
     \\b
     EXAMPLES:
       # Evaluate MaltParser
-      python scripts/cli.py evaluate-and-save -t malt -m checkpoints/malt_parser
+      python scripts/cli.py evaluate-and-save -t malt -m checkpoints/malt_parser.pkl
+      
+      # Evaluate Neural Parser (Chen & Manning)
+      python scripts/cli.py evaluate-and-save -t neural -m checkpoints/neural_parser.pt
       
       # Evaluate Biaffine
       python scripts/cli.py evaluate-and-save -t biaffine -m checkpoints/biaffine_model.pt
@@ -764,6 +767,11 @@ def evaluate_and_save(model_type, model_path, output_path, batch_size):
     
     click.echo(f"Loading {model_type} model from: {model_path}")
     
+    # Model type flags
+    is_neural_graph = False  # Graph-based neural (Biaffine/Triaffine)
+    is_neural_transition = False  # Transition-based neural (Chen & Manning)
+    is_malt = False
+    
     # Load model based on type
     if model_type.lower() == 'malt':
         import pickle
@@ -775,15 +783,40 @@ def evaluate_and_save(model_type, model_path, output_path, batch_size):
             click.echo(f"Error: MaltParser checkpoint not found at {model_path}")
             click.echo("MaltParser saves using pickle. Make sure you trained it first.")
             return
-        is_neural = False
+        is_malt = True
+    elif model_type.lower() == 'neural':
+        from models.transition_based.neural_parser import NeuralTransitionParser
+        from utils.util_deep_learning import device as neural_device
+        
+        checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+        
+        # Reconstruct model from checkpoint
+        args = checkpoint['args']
+        parser = NeuralTransitionParser(
+            n_words=args['n_words'],
+            n_tags=args['n_tags'],
+            n_rels=args['n_rels'],
+            n_actions=args['n_actions']
+        )
+        parser.load_state_dict(checkpoint['state_dict'])
+        
+        # Restore vocabs
+        parser.word_vocab = checkpoint['word_vocab'].stoi if hasattr(checkpoint['word_vocab'], 'stoi') else checkpoint['word_vocab']
+        parser.tag_vocab = checkpoint['tag_vocab'].stoi if hasattr(checkpoint['tag_vocab'], 'stoi') else checkpoint['tag_vocab']
+        parser.rel_vocab = checkpoint['rel_vocab'].stoi if hasattr(checkpoint['rel_vocab'], 'stoi') else checkpoint['rel_vocab']
+        parser.action_vocab = checkpoint['action_vocab']
+        parser.transform = checkpoint.get('transform', None)
+        
+        parser.to(neural_device)
+        is_neural_transition = True
     elif model_type.lower() == 'biaffine':
         from models.graph_based.biaffine_parser import BiaffineParser
         parser = BiaffineParser.load(model_path)
-        is_neural = True
+        is_neural_graph = True
     elif model_type.lower() == 'triaffine':
         from models.graph_based.triaffine_parser import TriaffineParser
         parser = TriaffineParser.load(model_path)
-        is_neural = True
+        is_neural_graph = True
     
     click.echo("Loading test corpus...")
     corpus = ViVTBCorpus()
@@ -796,8 +829,8 @@ def evaluate_and_save(model_type, model_path, output_path, batch_size):
         'metrics': {}
     }
     
-    if is_neural:
-        # Neural model evaluation (Biaffine/Triaffine)
+    if is_neural_graph:
+        # Graph-based Neural model evaluation (Biaffine/Triaffine)
         test = Dataset(parser.transform, corpus.test)
         test.build(batch_size, 32)
         
@@ -852,33 +885,143 @@ def evaluate_and_save(model_type, model_path, output_path, batch_size):
             'total_correct_rels': int(metric.correct_rels),
             'total_arcs': int(metric.total)
         }
-    else:
-        # MaltParser evaluation (non-neural)
-        click.echo("Evaluating MaltParser on test set...")
+    
+    elif is_neural_transition:
+        # Neural Transition Parser (Chen & Manning) evaluation
+        from transforms.conll import CoNLL as NeuralCoNLL
+        from utils.constants import bos as neural_bos
+        from utils.sp_data import Dataset as NeuralDataset
+        from utils.sp_field import Field as NeuralField
+        from utils.constants import pad, unk, bos
+        
+        click.echo("Evaluating Neural Transition Parser on test set...")
+        parser.eval()
+        
+        # Create a transform to load test data properly
+        WORD = NeuralField('words', pad=pad, unk=unk, bos=bos, lower=True)
+        TAG = NeuralField('tags', bos=bos)
+        ARC = NeuralField('arcs', bos=bos, use_vocab=False, fn=NeuralCoNLL.get_arcs)
+        REL = NeuralField('rels', bos=bos)
+        transform = NeuralCoNLL(FORM=WORD, CPOS=TAG, HEAD=ARC, DEPREL=REL)
+        
+        # Use vocabs from parser
+        test_dataset = NeuralDataset(transform, corpus.test)
         
         total_arcs, correct_arcs, correct_las = 0, 0, 0
         sent_idx = 0
         
-        for sentence in corpus.test:
-            words = [token['form'] for token in sentence]
-            tags = [token['upos'] for token in sentence]
-            gold_arcs = [int(token['head']) for token in sentence]
-            gold_rels = [token['deprel'] for token in sentence]
+        for sentence in test_dataset.sentences:
+            # Access attributes of sentence object
+            words_str = [bos] + list(sentence.words)
+            tags_str = [bos] + list(sentence.tags)
+            gold_arcs = [0] + list(NeuralCoNLL.get_arcs(sentence.arcs))
+            gold_rels = [bos] + list(sentence.rels)
+            
+            # Convert to indices using parser vocab
+            if hasattr(parser, 'word_vocab') and parser.word_vocab:
+                words = [parser.word_vocab.get(w.lower(), parser.unk_idx) for w in words_str]
+            else:
+                words = list(range(len(words_str)))
+            
+            if hasattr(parser, 'tag_vocab') and parser.tag_vocab:
+                tags = [parser.tag_vocab.get(t, 0) for t in tags_str]
+            else:
+                tags = list(range(len(tags_str)))
             
             # Predict
-            pred_arcs, pred_rels = parser.parse(words, tags)
+            pred_arcs_dict, pred_rels_dict = parser.parse(words, tags)
+            
+            # Convert dict to list
+            n_tokens = len(words_str) - 1  # Exclude ROOT/bos
+            pred_arcs = [pred_arcs_dict.get(i, 0) for i in range(1, n_tokens + 1)]
+            pred_rels = [pred_rels_dict.get(i, 'dep') for i in range(1, n_tokens + 1)]
+            
+            # Calculate metrics (exclude ROOT)
+            arc_correct = sum(1 for i in range(n_tokens) if gold_arcs[i+1] == pred_arcs[i])
+            las_correct = sum(1 for i in range(n_tokens) 
+                             if gold_arcs[i+1] == pred_arcs[i] and gold_rels[i+1] == pred_rels[i])
+            
+            results['sentences'].append({
+                'id': sent_idx,
+                'length': n_tokens,
+                'words': list(sentence.words),
+                'gold_arcs': gold_arcs[1:],
+                'pred_arcs': pred_arcs,
+                'gold_rels': gold_rels[1:],
+                'pred_rels': pred_rels,
+                'correct_arcs': arc_correct,
+                'correct_las': las_correct
+            })
+            
+            total_arcs += n_tokens
+            correct_arcs += arc_correct
+            correct_las += las_correct
+            sent_idx += 1
+        
+        results['metrics'] = {
+            'uas': correct_arcs / total_arcs if total_arcs > 0 else 0,
+            'las': correct_las / total_arcs if total_arcs > 0 else 0,
+            'total_correct_arcs': correct_arcs,
+            'total_correct_rels': correct_las,
+            'total_arcs': total_arcs
+        }
+    
+    else:
+        # MaltParser evaluation (non-neural)
+        from transforms.conll import CoNLL as MaltCoNLL
+        from utils.sp_data import Dataset as MaltDataset
+        from utils.sp_field import Field as MaltField
+        from utils.constants import pad, unk, bos
+        
+        click.echo("Evaluating MaltParser on test set...")
+        
+        # Create transform for loading test data
+        WORD = MaltField('words', pad=pad, unk=unk, bos=bos, lower=True)
+        TAG = MaltField('tags', bos=bos)
+        ARC = MaltField('arcs', bos=bos, use_vocab=False, fn=MaltCoNLL.get_arcs)
+        REL = MaltField('rels', bos=bos)
+        transform = MaltCoNLL(FORM=WORD, CPOS=TAG, HEAD=ARC, DEPREL=REL)
+        
+        test_dataset = MaltDataset(transform, corpus.test)
+        
+        total_arcs, correct_arcs, correct_las = 0, 0, 0
+        sent_idx = 0
+        
+        for sentence in test_dataset.sentences:
+            # Access attributes of sentence object
+            words_list = list(sentence.words)
+            tags_list = list(sentence.tags)
+            gold_arcs = list(MaltCoNLL.get_arcs(sentence.arcs))
+            gold_rels = list(sentence.rels)
+            
+            # Convert to word IDs using parser's vocab if available
+            if hasattr(parser, 'WORD') and parser.WORD:
+                words = [parser.WORD.vocab.stoi.get(w.lower(), parser.WORD.unk_index) for w in [bos] + words_list]
+                feats = [parser.FEAT.vocab.stoi.get(t, 0) for t in [bos] + tags_list]
+            else:
+                # Fallback - use indices
+                words = list(range(len(words_list) + 1))
+                feats = list(range(len(tags_list) + 1))
+            
+            # Predict
+            pred_arcs_dict, pred_rels_dict = parser.parse(words, feats)
+            
+            # Convert dict to list
+            n_tokens = len(words_list)
+            pred_arcs = [pred_arcs_dict.get(i, 0) for i in range(1, n_tokens + 1)]
+            pred_rels = [pred_rels_dict.get(i, 'dep') for i in range(1, n_tokens + 1)]
             
             # Calculate metrics
-            n_tokens = len(words)
-            arc_correct = sum(1 for g, p in zip(gold_arcs, pred_arcs) if g == p)
-            las_correct = sum(1 for ga, pa, gr, pr in zip(gold_arcs, pred_arcs, gold_rels, pred_rels) 
+            gold_arcs_list = [gold_arcs[i] for i in range(n_tokens)]
+            arc_correct = sum(1 for g, p in zip(gold_arcs_list, pred_arcs) if g == p)
+            las_correct = sum(1 for ga, pa, gr, pr in zip(gold_arcs_list, pred_arcs, gold_rels, pred_rels) 
                              if ga == pa and gr == pr)
             
             results['sentences'].append({
                 'id': sent_idx,
                 'length': n_tokens,
-                'words': words,
-                'gold_arcs': gold_arcs,
+                'words': words_list,
+                'gold_arcs': gold_arcs_list,
                 'pred_arcs': pred_arcs,
                 'gold_rels': gold_rels,
                 'pred_rels': pred_rels,

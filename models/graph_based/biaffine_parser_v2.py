@@ -207,7 +207,7 @@ class BiaffineParserV2(Model):
             word_embed, feat_embed = self.embed_dropout(word_embed, feat_embed)
             embed = torch.cat((word_embed, feat_embed), -1)
 
-        x = pack_padded_sequence(embed, mask.sum(1), True, False)
+        x = pack_padded_sequence(embed, mask.sum(1).cpu(), True, False)
         x, _ = self.lstm(x)
         x, _ = pad_packed_sequence(x, True, total_length=seq_len)
         x = self.lstm_dropout(x)

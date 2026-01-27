@@ -586,6 +586,48 @@ cli.add_command(train_ablation_jointtagger)
 cli.add_command(train_ablation_jointtagger_real)
 
 
+@click.command('train-ablation-nobert')
+@click.option('--epochs', default=20, type=int)
+@click.option('--batch-size', default=5000, type=int)
+@click.option('--lr', default=2e-3, type=float, help='Learning rate')
+@click.option('--embed', default=None, help='Path to pretrained word embeddings (FastText/Word2Vec)')
+@click.option('--use-sibling/--no-sibling', default=True, help='Enable/disable sibling features')
+@click.option('--save-path', '-s', default='checkpoints/ablation_nobert.pt')
+def train_ablation_nobert(epochs, batch_size, lr, embed, use_sibling, save_path):
+    """Ablation: Triaffine WITHOUT BERT (CharLSTM + Word + Tag only).
+    
+    This ablation study measures how much BERT contributes to parsing.
+    Uses traditional embeddings instead:
+    - CharLSTM for character-level features
+    - Word embeddings (optionally pretrained)
+    - POS Tag embeddings
+    """
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.triaffine_nobert_trainer import TriaffineNoBertTrainer
+    
+    click.echo("Ablation: Triaffine WITHOUT BERT")
+    click.echo(f"   Using: CharLSTM + Word + Tag embeddings")
+    click.echo(f"   Pretrained embeddings: {embed or 'None'}")
+    click.echo(f"   use_sibling: {use_sibling}")
+    corpus = ViVTBCorpus()
+    trainer = TriaffineNoBertTrainer(corpus)
+    trainer.train(
+        base_path=save_path, 
+        embed=embed, 
+        max_epochs=epochs, 
+        batch_size=batch_size, 
+        lr=lr,
+        use_sibling=use_sibling
+    )
+    click.echo(f"Done! Model saved to: {save_path}")
+
+
+cli.add_command(train_ablation_nobert)
+
+
 @click.command('test-jointtagger')
 @click.option('--model-path', '-m', required=True, help='Path to saved joint tagger model')
 def test_jointtagger(model_path):

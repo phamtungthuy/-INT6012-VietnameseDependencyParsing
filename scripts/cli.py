@@ -674,6 +674,252 @@ cli.add_command(train_triaffine_full)
 cli.add_command(test_jointtagger)
 
 
+# ============================================================================
+# EVALUATION & ANALYSIS COMMANDS
+# ============================================================================
+
+@click.command('evaluate-and-save')
+@click.option('--model-type', '-t', required=True, 
+              type=click.Choice(['malt', 'biaffine', 'triaffine'], case_sensitive=False),
+              help='Type of model to evaluate')
+@click.option('--model-path', '-m', required=True, help='Path to saved model checkpoint')
+@click.option('--output-path', '-o', default=None, help='Path to save results JSON (default: results/<model-type>_results.json)')
+@click.option('--batch-size', default=3000, type=int, help='Batch size for evaluation')
+def evaluate_and_save(model_type, model_path, output_path, batch_size):
+    """Evaluate a trained model on test set and save results for visualization.
+    
+    This command:
+    1. Loads a trained model (malt, biaffine, or triaffine)
+    2. Runs evaluation on the test set
+    3. Saves predictions, gold labels, and metrics to JSON for analysis
+    
+    \\b
+    EXAMPLES:
+      # Evaluate MaltParser
+      python scripts/cli.py evaluate-and-save -t malt -m checkpoints/malt_parser
+      
+      # Evaluate Biaffine
+      python scripts/cli.py evaluate-and-save -t biaffine -m checkpoints/biaffine_model.pt
+      
+      # Evaluate Triaffine
+      python scripts/cli.py evaluate-and-save -t triaffine -m checkpoints/triaffine_model.pt
+    """
+    import sys
+    import json
+    import os
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    
+    import torch
+    from datasets import ViVTBCorpus
+    from utils.sp_data import Dataset
+    from utils.sp_metric import AttachmentMetric
+    
+    # Set default output path
+    if output_path is None:
+        os.makedirs('results', exist_ok=True)
+        output_path = f'results/{model_type}_results.json'
+    
+    click.echo(f"Loading {model_type} model from: {model_path}")
+    
+    # Load model based on type
+    if model_type.lower() == 'malt':
+        import pickle
+        click.echo("Note: MaltParser uses pickle for serialization")
+        try:
+            with open(model_path, 'rb') as f:
+                parser = pickle.load(f)
+        except FileNotFoundError:
+            click.echo(f"Error: MaltParser checkpoint not found at {model_path}")
+            click.echo("MaltParser saves using pickle. Make sure you trained it first.")
+            return
+        is_neural = False
+    elif model_type.lower() == 'biaffine':
+        from models.graph_based.biaffine_parser import BiaffineParser
+        parser = BiaffineParser.load(model_path)
+        is_neural = True
+    elif model_type.lower() == 'triaffine':
+        from models.graph_based.triaffine_parser import TriaffineParser
+        parser = TriaffineParser.load(model_path)
+        is_neural = True
+    
+    click.echo("Loading test corpus...")
+    corpus = ViVTBCorpus()
+    
+    # Store results
+    results = {
+        'model_type': model_type,
+        'model_path': model_path,
+        'sentences': [],
+        'metrics': {}
+    }
+    
+    if is_neural:
+        # Neural model evaluation (Biaffine/Triaffine)
+        test = Dataset(parser.transform, corpus.test)
+        test.build(batch_size, 32)
+        
+        click.echo("Evaluating on test set...")
+        parser.eval()
+        metric = AttachmentMetric()
+        
+        sent_idx = 0
+        with torch.no_grad():
+            for batch in test.loader:
+                if len(batch) == 4:
+                    words, feats, arcs, rels = batch
+                elif len(batch) == 5:
+                    words, feats, tags, arcs, rels = batch
+                else:
+                    continue
+                
+                mask = words.ne(parser.pad_index)
+                mask[:, 0] = 0
+                
+                # Forward
+                if hasattr(parser, 'forward'):
+                    if len(batch) == 5 and hasattr(parser, 'n_tags'):
+                        s_arc, s_rel = parser.forward(words, feats, tags)
+                    else:
+                        s_arc, s_rel = parser.forward(words, feats)
+                
+                arc_preds, rel_preds = parser.decode(s_arc, s_rel, mask)
+                metric(arc_preds, rel_preds, arcs, rels, mask)
+                
+                # Save per-sentence results
+                lens = mask.sum(1).tolist()
+                for i, length in enumerate(lens):
+                    sent_result = {
+                        'id': sent_idx,
+                        'length': length,
+                        'gold_arcs': arcs[i, 1:length+1].tolist(),
+                        'pred_arcs': arc_preds[i, 1:length+1].tolist(),
+                        'gold_rels': rels[i, 1:length+1].tolist(),
+                        'pred_rels': rel_preds[i, 1:length+1].tolist(),
+                        'correct_arcs': (arc_preds[i, 1:length+1] == arcs[i, 1:length+1]).sum().item(),
+                        'correct_las': ((arc_preds[i, 1:length+1] == arcs[i, 1:length+1]) & 
+                                       (rel_preds[i, 1:length+1] == rels[i, 1:length+1])).sum().item()
+                    }
+                    results['sentences'].append(sent_result)
+                    sent_idx += 1
+        
+        results['metrics'] = {
+            'uas': float(metric.uas),
+            'las': float(metric.las),
+            'total_correct_arcs': int(metric.correct_arcs),
+            'total_correct_rels': int(metric.correct_rels),
+            'total_arcs': int(metric.total)
+        }
+    else:
+        # MaltParser evaluation (non-neural)
+        click.echo("Evaluating MaltParser on test set...")
+        
+        total_arcs, correct_arcs, correct_las = 0, 0, 0
+        sent_idx = 0
+        
+        for sentence in corpus.test:
+            words = [token['form'] for token in sentence]
+            tags = [token['upos'] for token in sentence]
+            gold_arcs = [int(token['head']) for token in sentence]
+            gold_rels = [token['deprel'] for token in sentence]
+            
+            # Predict
+            pred_arcs, pred_rels = parser.parse(words, tags)
+            
+            # Calculate metrics
+            n_tokens = len(words)
+            arc_correct = sum(1 for g, p in zip(gold_arcs, pred_arcs) if g == p)
+            las_correct = sum(1 for ga, pa, gr, pr in zip(gold_arcs, pred_arcs, gold_rels, pred_rels) 
+                             if ga == pa and gr == pr)
+            
+            results['sentences'].append({
+                'id': sent_idx,
+                'length': n_tokens,
+                'words': words,
+                'gold_arcs': gold_arcs,
+                'pred_arcs': pred_arcs,
+                'gold_rels': gold_rels,
+                'pred_rels': pred_rels,
+                'correct_arcs': arc_correct,
+                'correct_las': las_correct
+            })
+            
+            total_arcs += n_tokens
+            correct_arcs += arc_correct
+            correct_las += las_correct
+            sent_idx += 1
+        
+        results['metrics'] = {
+            'uas': correct_arcs / total_arcs if total_arcs > 0 else 0,
+            'las': correct_las / total_arcs if total_arcs > 0 else 0,
+            'total_correct_arcs': correct_arcs,
+            'total_correct_rels': correct_las,
+            'total_arcs': total_arcs
+        }
+    
+    # Save results
+    click.echo(f"Saving results to: {output_path}")
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else '.', exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+    
+    click.echo(f"\nResults:")
+    click.echo(f"  Model: {model_type}")
+    click.echo(f"  UAS: {results['metrics']['uas']:.2%}")
+    click.echo(f"  LAS: {results['metrics']['las']:.2%}")
+    click.echo(f"  Total sentences: {len(results['sentences'])}")
+    click.echo(f"  Saved to: {output_path}")
+
+
+@click.command('compare-models')
+@click.option('--results-dir', '-d', default='results', help='Directory containing result JSON files')
+def compare_models(results_dir):
+    """Compare results from multiple models and generate summary.
+    
+    Reads all *_results.json files in the results directory and creates
+    a comparison table.
+    """
+    import os
+    import json
+    from pathlib import Path
+    
+    result_files = list(Path(results_dir).glob('*_results.json'))
+    
+    if not result_files:
+        click.echo(f"No result files found in {results_dir}")
+        return
+    
+    click.echo(f"\n{'='*60}")
+    click.echo(f"{'Model Comparison':^60}")
+    click.echo(f"{'='*60}")
+    click.echo(f"{'Model':<20} {'UAS':>10} {'LAS':>10} {'Sentences':>12}")
+    click.echo(f"{'-'*60}")
+    
+    all_results = []
+    for f in sorted(result_files):
+        with open(f, 'r', encoding='utf-8') as fp:
+            data = json.load(fp)
+            all_results.append(data)
+            click.echo(f"{data['model_type']:<20} {data['metrics']['uas']:>10.2%} {data['metrics']['las']:>10.2%} {len(data['sentences']):>12}")
+    
+    click.echo(f"{'='*60}")
+    
+    # Save comparison
+    comparison_path = os.path.join(results_dir, 'comparison.json')
+    comparison = {
+        'models': [r['model_type'] for r in all_results],
+        'uas': [r['metrics']['uas'] for r in all_results],
+        'las': [r['metrics']['las'] for r in all_results]
+    }
+    with open(comparison_path, 'w', encoding='utf-8') as f:
+        json.dump(comparison, f, indent=2)
+    click.echo(f"Comparison saved to: {comparison_path}")
+
+
+cli.add_command(evaluate_and_save)
+cli.add_command(compare_models)
+
+
 def main():
     cli()
 

@@ -538,12 +538,52 @@ def train_ablation_jointtagger(epochs, batch_size, lr, bert_lr, embed, save_path
     click.echo(f"✅ Done! Model saved to: {save_path}")
 
 
+@click.command('train-ablation-jointtagger-real')
+@click.option('--epochs', default=20, type=int)
+@click.option('--batch-size', default=3000, type=int)
+@click.option('--lr', default=2e-3, type=float, help='Learning rate (general)')
+@click.option('--bert-lr', default=5e-5, type=float, help='Learning rate (BERT)')
+@click.option('--embed', default=None, help='Path to pretrained embeddings')
+@click.option('--use-sibling/--no-sibling', default=True, help='Enable/disable sibling features')
+@click.option('--save-path', '-s', default='checkpoints/ablation_jointtagger_real.pt')
+def train_ablation_jointtagger_real(epochs, batch_size, lr, bert_lr, embed, use_sibling, save_path):
+    """REAL Triaffine Joint Tagger: Joint POS Tagger + Sibling Features.
+    
+    This is the REAL implementation with both:
+    1. Joint POS Tagger Branch (predict tags, feed to parser)
+    2. Sibling Features (MLP_arc_s, MLP_rel_s) + Triaffine scoring
+    
+    Use --no-sibling to disable sibling features for ablation comparison.
+    """
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from datasets import ViVTBCorpus
+    from trainers.jointtagger_real_trainer import JointTaggerRealTrainer
+    
+    click.echo("🔺 Training REAL Triaffine Joint Tagger (Sibling + Joint Tagger)")
+    click.echo(f"   use_sibling: {use_sibling}")
+    corpus = ViVTBCorpus()
+    trainer = JointTaggerRealTrainer(corpus)
+    trainer.train(
+        base_path=save_path, 
+        embed=embed, 
+        max_epochs=epochs, 
+        batch_size=batch_size, 
+        lr=lr, 
+        bert_lr=bert_lr,
+        use_sibling=use_sibling
+    )
+    click.echo(f"✅ Done! Model saved to: {save_path}")
+
+
 cli.add_command(train_ablation_multihead)
 cli.add_command(train_ablation_scalarmix)
 cli.add_command(train_ablation_charlstm)
 cli.add_command(train_ablation_combined)
 cli.add_command(train_ablation_noword)
 cli.add_command(train_ablation_jointtagger)
+cli.add_command(train_ablation_jointtagger_real)
 
 
 @click.command('test-jointtagger')
